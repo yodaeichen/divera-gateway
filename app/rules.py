@@ -243,6 +243,17 @@ def build_payload(rule: m.Rule, values: dict) -> dict:
     return payload
 
 
+def key_for(tenant: m.Tenant, payload: dict | None = None) -> str:
+    """Der passende Accesskey: für die v2-Schnittstelle der persönliche Schlüssel, wenn einer hinterlegt ist."""
+    if (payload is None or "News" in payload) and tenant.accesskey_user_enc:
+        return sec.decrypt(tenant.accesskey_user_enc)
+    return sec.decrypt(tenant.accesskey_enc)
+
+
+V2_FORBIDDEN_HINT = (" Hinweis: Die v2-Schnittstelle hat den Accesskey abgelehnt. Sie verlangt den persönlichen Accesskey eines "
+                     "DIVERA-Benutzers, der Mitteilungen schreiben darf. Trage ihn beim Kunden unter „Persönlicher Accesskey“ ein.")
+
+
 def encode_payload(payload: dict) -> dict:
     """Formulardaten für DIVERA: Listen gehen als wiederholtes name[]=wert, so entsteht dort ein Array."""
     return {(f"{key}[]" if isinstance(value, list) else key): value for key, value in payload.items()}
@@ -266,7 +277,8 @@ def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
             except (ValueError, AttributeError):
                 pass
             if ok or resp.status_code < 500:
-                return ok, f"HTTP {resp.status_code}: {body}"
+                hint = V2_FORBIDDEN_HINT if "News" in payload and resp.status_code in (401, 403) else ""
+                return ok, f"HTTP {resp.status_code}: {body}{hint}"
             error = f"HTTP {resp.status_code}: {body}"
         except httpx.HTTPError as exc:
             error = f"Netzwerkfehler: {type(exc).__name__}"
@@ -300,7 +312,7 @@ def process_message(db, source: m.Source, msg: dict) -> int:
         if tenant.test_mode:
             status, detail = "test", "Testmodus, nicht gesendet: " + json.dumps(payload, ensure_ascii=False)
         else:
-            ok, detail = send_divera(sec.decrypt(tenant.accesskey_enc), payload)
+            ok, detail = send_divera(key_for(tenant, payload), payload)
             status = "gesendet" if ok else "fehler"
             detail = f"{title_of(payload)} | {detail}"
         db.add(m.Log(**common, rule_name=rule.name, status=status, detail=detail[:2000]))

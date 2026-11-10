@@ -233,6 +233,27 @@ with TestClient(app, base_url="http://testserver") as c:
     assert rules.send_divera("k", one["payload"])[0] and v2wire["url"].endswith("/api/v2/news") and v2wire["data"] is None
     assert v2wire["json"]["News"]["user_cluster_relation"] == [501] and v2wire["params"] == {"accesskey": "k"}
     rules.httpx.post = keep_post
+    # v2 braucht den persönlichen Accesskey
+    assert one["user_key"] is False
+    class _R403:
+        status_code, text = 403, '{"name":"Forbidden","message":"Nicht autorisiert"}'
+        def json(self): return {"name": "Forbidden"}
+    rules.httpx.post = lambda *a, **k: _R403()
+    ok403, det403 = rules.send_divera("k", one["payload"])
+    assert not ok403 and "persönlichen Accesskey" in det403
+    assert "persönlichen Accesskey" not in rules.send_divera("k", {"title": "x"})[1], "Hinweis nur für v2"
+    rules.httpx.post = keep_post
+    used = []
+    rules.send_divera = lambda key, payload: used.append(key) or (True, "ok")
+    c.post("/rules/send-test", data=dict(NEWS, ric="", ucr=["501"], push="0", confirm="ja"))
+    assert used == ["geheim123"], "ohne persönlichen Schlüssel wird der Einheiten-Schlüssel versucht"
+    r = c.post("/tenants/save", data={"csrf": tok, "id": "1", "name": "FF Musterstadt", "accesskey_user": "persoenlich456", "active": "on", "test_mode": "on"})
+    assert "persoenlich456" not in r.text and "persoenlich456" not in c.get("/tenants/1/edit").text
+    c.post("/rules/send-test", data=dict(NEWS, ric="", ucr=["501"], push="0", confirm="ja"))
+    c.post("/rules/send-test", data=dict(NEWS, confirm="ja"))   # alter Weg mit RIC
+    assert used == ["geheim123", "persoenlich456", "geheim123"], used
+    assert c.post("/rules/preview", data=dict(NEWS, ric="", ucr=["501"])).json()["user_key"] is True
+    rules.send_divera = real_send
     askn = c.post("/rules/send-test", data=dict(NEWS, ric="", ucr=["501"], push="0")).text
     assert "Mitteilung ohne Push gesendet" in askn and "nur die angekreuzten Personen" in askn and "Muster, Max" in askn
     assert "Geht an alle Mitglieder der Einheit" in c.post("/rules/send-test", data=dict(NEWS, ric="", push="0")).text

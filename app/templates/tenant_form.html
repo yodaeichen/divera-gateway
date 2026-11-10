@@ -9,6 +9,10 @@
   <label>DIVERA-Accesskey</label>
   <input type="password" name="accesskey" autocomplete="new-password" placeholder="{{ 'gespeichert, leer lassen zum Beibehalten' if tenant and tenant.accesskey_enc else '' }}">
   <p class="hint">In DIVERA unter Verwaltung &gt; Einstellungen &gt; Schnittstellen &gt; API. Wird verschlüsselt gespeichert und nie wieder angezeigt.</p>
+  <label>Persönlicher Accesskey (optional)</label>
+  <input type="password" name="accesskey_user" autocomplete="new-password" placeholder="{{ 'gespeichert, leer lassen zum Beibehalten' if tenant and tenant.accesskey_user_enc else '' }}">
+  <p class="hint">Nur nötig für Mitteilungen ohne Push und für Mitteilungen gezielt an angekreuzte Personen oder Gruppen. Diese laufen über die neuere DIVERA-Schnittstelle, die den Accesskey eines Benutzers verlangt, der Mitteilungen schreiben darf. Am besten einen eigenen Benutzer nur für das Gateway anlegen. Wird ebenfalls verschlüsselt gespeichert.</p>
+  {% if tenant and tenant.accesskey_user_enc %}<label class="check"><input type="checkbox" name="accesskey_user_clear"> Persönlichen Accesskey entfernen</label>{% endif %}
   <label class="check"><input type="checkbox" name="active" {{ 'checked' if not tenant or tenant.active }}> Aktiv</label>
   <label class="check"><input type="checkbox" name="test_mode" {{ 'checked' if not tenant or tenant.test_mode }}> Testmodus: Treffer nur protokollieren, nichts an DIVERA senden</label>
   <div class="actions"><button>Speichern</button><a class="btn light" href="{{ '/tenants/%d'|format(tenant.id) if tenant else '/' }}">Abbrechen</a></div>

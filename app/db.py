@@ -45,6 +45,8 @@ class Tenant(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     accesskey_enc: Mapped[str] = mapped_column(Text, default="")
+    # Persönlicher Accesskey eines DIVERA-Benutzers: nötig für die v2-Schnittstelle (Mitteilungen ohne Push, gezielte Empfänger)
+    accesskey_user_enc: Mapped[str] = mapped_column(Text, default="", server_default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     test_mode: Mapped[bool] = mapped_column(Boolean, default=True)
     # Aus DIVERA geladene Personen und Gruppen: {"persons": [{"id", "name"}], "groups": [...]}
@@ -134,7 +136,7 @@ class Processed(Base):
 
 # Spalten, die nach der ersten Version dazugekommen sind. Bestehende Datenbanken werden beim Start ergänzt.
 ADDED_COLUMNS = {
-    "tenants": {"directory": "TEXT DEFAULT '{}'", "directory_ts": "DATETIME"},
+    "tenants": {"directory": "TEXT DEFAULT '{}'", "directory_ts": "DATETIME", "accesskey_user_enc": "TEXT DEFAULT ''"},
     "rules": {"ucr_ids": "VARCHAR(1000) DEFAULT ''", "group_ids": "VARCHAR(1000) DEFAULT ''", "push": "BOOLEAN DEFAULT 1"},
 }
 

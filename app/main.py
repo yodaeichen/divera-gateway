@@ -215,6 +215,10 @@ async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.U
     tenant.test_mode = "test_mode" in form
     if text(form, "accesskey"):
         tenant.accesskey_enc = sec.encrypt(text(form, "accesskey"))
+    if text(form, "accesskey_user"):
+        tenant.accesskey_user_enc = sec.encrypt(text(form, "accesskey_user"))
+    if "accesskey_user_clear" in form:
+        tenant.accesskey_user_enc = ""
     db.add(tenant)
     db.commit()
     flash(request, "Kunde gespeichert.")
@@ -227,7 +231,7 @@ async def tenant_directory(tid: int, request: Request, db: Session = Depends(get
     await read_form(request)
     tenant = need(db.get(m.Tenant, tid))
     try:
-        directory = await asyncio.to_thread(rules.fetch_directory, sec.decrypt(tenant.accesskey_enc))
+        directory = await asyncio.to_thread(rules.fetch_directory, rules.key_for(tenant))
     except Exception as exc:
         flash(request, f"Empfänger konnten nicht geladen werden: {str(exc)[:300]}", "err")
         return go(f"/tenants/{tid}")
@@ -505,7 +509,8 @@ async def rule_preview(request: Request, db: Session = Depends(get_db), user: m.
     def names(kind: str, ids: str) -> list[str]:
         lookup = {str(entry["id"]): entry["name"] for entry in directory[kind]}
         return [lookup.get(i, f"ID {i}") for i in rules.id_list(ids)]
-    data.update(state="ok", form_error=error, persons=names("persons", rule.ucr_ids), groups=names("groups", rule.group_ids))
+    data.update(state="ok", form_error=error, persons=names("persons", rule.ucr_ids), groups=names("groups", rule.group_ids),
+                user_key=bool(need(db.get(m.Tenant, rule.tenant_id)).accesskey_user_enc))
     return JSONResponse(data)
 
 
@@ -537,7 +542,7 @@ async def rule_send_test(request: Request, db: Session = Depends(get_db), user: 
         fields = [(k, v) for k, v in form.multi_items() if k not in ("csrf", "confirm") and isinstance(v, str)]
         return page(request, "rule_send_confirm.html", user, tenant=tenant, rule=rule, data=data, fields=fields,
                     persons=names("persons", rule.ucr_ids), groups=names("groups", rule.group_ids))
-    ok, detail = await asyncio.to_thread(rules.send_divera, sec.decrypt(tenant.accesskey_enc), data["payload"])
+    ok, detail = await asyncio.to_thread(rules.send_divera, rules.key_for(tenant, data["payload"]), data["payload"])
     db.add(m.Log(tenant_id=tenant.id, tenant_name=tenant.name, source_name="Testsendung von Hand", rule_name=rule.name,
                  sender=sample["from"][:200], subject=sample["subject"][:300], status="gesendet" if ok else "fehler",
                  detail=f"{rules.title_of(data['payload'])} | {detail} | ausgelöst von {user.username}"[:2000]))
