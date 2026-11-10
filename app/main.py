@@ -97,6 +97,10 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> m.User:
     user = db.get(m.User, uid) if uid else None
     if not user:
         raise LoginRequired()
+    now = m.utcnow()
+    if user.last_seen is None or (now - user.last_seen).total_seconds() > 60:  # höchstens einmal je Minute schreiben
+        user.last_seen = now
+        db.commit()
     return user
 
 
@@ -196,19 +200,55 @@ async def login(request: Request, db: Session = Depends(get_db)):
         flash(request, "Benutzername oder Passwort falsch.", "err")
         return go("/login")
     _failed.pop(username.lower(), None)
+    user.last_login = user.last_seen = m.utcnow()
+    db.commit()
     request.session.clear()
     request.session["uid"] = user.id
     return go("/")
 
 
 @app.post("/logout")
-async def logout(request: Request):
+async def logout(request: Request, db: Session = Depends(get_db)):
     await read_form(request)
+    user = db.get(m.User, request.session.get("uid") or 0)
+    if user:
+        user.last_seen = None  # gilt sofort als abgemeldet
+        db.commit()
     request.session.clear()
     return go("/login")
 
 
 # ---------- Übersicht und Kunden ----------
+
+ONLINE_MINUTES = 15
+STATUS_LABELS = [("gesendet", "Erfolgreich an DIVERA gesendet"), ("fehler", "Fehlgeschlagen"), ("test", "Nur Testmodus (nicht gesendet)"),
+                 ("ignoriert", "Keine Regel hat gepasst"), ("veraltet", "Zu alt, nicht übergeben")]
+
+
+def admin_overview(db: Session, now: dt.datetime) -> dict:
+    """Für Benutzer mit Rechteverwaltung: wer angemeldet ist und wie viele Meldungen erfolgreich oder fehlgeschlagen sind."""
+    limit = now - dt.timedelta(minutes=ONLINE_MINUTES)
+    people = [{"name": u.username, "role": access.role_of(u), "last_seen": u.last_seen, "last_login": u.last_login,
+               "online": bool(u.last_seen and u.last_seen >= limit)}
+              for u in db.scalars(select(m.User).order_by(m.User.username))]
+    people.sort(key=lambda p: (not p["online"], p["name"].lower()))
+
+    def counts(since: dt.datetime | None) -> dict:
+        query = select(m.Log.status, func.count(m.Log.id)).group_by(m.Log.status)
+        if since:
+            query = query.where(m.Log.ts >= since)
+        return dict(db.execute(query).all())
+
+    windows = [("letzte 24 Stunden", counts(now - dt.timedelta(hours=24))), ("letzte 7 Tage", counts(now - dt.timedelta(days=7))),
+               (f"gesamt (Protokoll reicht {worker.LOG_DAYS} Tage zurück)", counts(None))]
+    per_tenant: dict[str, dict] = {}
+    week = select(m.Log.tenant_name, m.Log.status, func.count(m.Log.id)).where(m.Log.ts >= now - dt.timedelta(days=7)) \
+        .group_by(m.Log.tenant_name, m.Log.status)
+    for name, status, number in db.execute(week).all():
+        per_tenant.setdefault(name or "ohne Kunde", {})[status] = number
+    return {"people": people, "online": sum(1 for p in people if p["online"]), "windows": windows,
+            "per_tenant": sorted(per_tenant.items()), "labels": STATUS_LABELS, "minutes": ONLINE_MINUTES}
+
 
 @app.get("/")
 def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
@@ -225,7 +265,8 @@ def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = De
             upcoming = [s.last_poll + dt.timedelta(seconds=s.poll_interval) if s.last_poll else now for s in pollable]
             info.update(next=min(upcoming), due=min(upcoming) <= now, interval=min(s.poll_interval for s in pollable))
         schedule[tenant.id] = info
-    return page(request, "dashboard.html", user, tenants=tenants, logs=logs, schedule=schedule)
+    admin = admin_overview(db, now) if access.perms_of(user)["users"] == 2 else None
+    return page(request, "dashboard.html", user, tenants=tenants, logs=logs, schedule=schedule, admin=admin)
 
 
 @app.get("/tenants/new")

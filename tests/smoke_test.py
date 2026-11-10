@@ -387,10 +387,28 @@ with TestClient(app, base_url="http://testserver") as c:
         page_ = client.post("/login", data={"csrf": t, "username": name, "password": password})
         return client, csrf(page_.text), page_.text
 
+    # Übersicht für Administratoren: wer angemeldet ist, Erfolg und Fehler
+    adm = c.get("/").text
+    assert "Angemeldet" in adm and "Meldungen" in adm and "erfolgreich<br>in 24 Stunden" in adm and "Je Kunde, letzte 7 Tage" in adm
+    with m.SessionLocal() as db:
+        ov = __import__("app.main", fromlist=["x"]).admin_overview(db, m.utcnow())
+        assert ov["online"] == 1 and [p["name"] for p in ov["people"] if p["online"]] == ["admin"]
+        total = ov["windows"][2][1]
+        assert total["gesendet"] >= 1 and total["fehler"] >= 1 and total["test"] >= 1 and total == ov["windows"][0][1]
+        assert dict(ov["per_tenant"])["FF Musterstadt"]["gesendet"] == total["gesendet"]
+
     # Betrachter, nur Kunde 1
     v, vt, home = login("leser", "leser-passwort-1")
     assert "FF Musterstadt" in home and "Andere Wehr" not in home and "Kunde anlegen" not in home and "Jetzt abrufen" not in home
     assert "GEHEIM-FREMD" not in home and "Alarm Eigen" in home and ">Benutzer<" not in home and "Mein Konto" in home
+    assert "Angemeldet" not in home and "in 24 Stunden" not in home, "Übersicht nur für Administratoren"
+    with m.SessionLocal() as db:
+        ov = __import__("app.main", fromlist=["x"]).admin_overview(db, m.utcnow())
+        assert ov["online"] == 2 and {p["name"] for p in ov["people"] if p["online"]} == {"admin", "leser"}
+        leser_now = db.query(m.User).filter_by(username="leser").one()
+        assert leser_now.last_login is not None
+        leser_now.last_seen = m.utcnow() - __import__("datetime").timedelta(minutes=20); db.commit()
+        assert __import__("app.main", fromlist=["x"]).admin_overview(db, m.utcnow())["online"] == 1, "nach 15 Minuten ohne Aktivität nicht mehr angemeldet"
     assert v.get("/tenants/2").status_code == 404 and v.get(f"/rules/{other_rule}/edit").status_code == 404
     t1 = v.get("/tenants/1").text
     assert "Kunde bearbeiten" not in t1 and "Regel anlegen" not in t1 and "Schlüssel prüfen" not in t1 and "/hook/" not in t1
@@ -450,5 +468,8 @@ with TestClient(app, base_url="http://testserver") as c:
 
     c.post("/logout", data={"csrf": tok})
     assert c.get("/logs", follow_redirects=False).status_code == 303
+    with m.SessionLocal() as db:
+        gone = db.query(m.User).filter_by(username="admin").one()
+        assert gone.last_seen is None and gone.last_login is not None, "nach dem Abmelden sofort nicht mehr angemeldet"
 
 print("Alle Prüfungen bestanden.")

@@ -41,6 +41,8 @@ class User(Base):
     perms: Mapped[str | None] = mapped_column(Text, nullable=True)
     all_tenants: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     tenant_ids: Mapped[str] = mapped_column(Text, default="", server_default="")  # erlaubte Kunden-IDs, mit Komma
+    last_login: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    last_seen: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)  # letzte Aktivität; leer nach dem Abmelden
 
 
 class Tenant(Base):
@@ -140,7 +142,8 @@ class Processed(Base):
 
 # Spalten, die nach der ersten Version dazugekommen sind. Bestehende Datenbanken werden beim Start ergänzt.
 ADDED_COLUMNS = {
-    "users": {"perms": "TEXT", "all_tenants": "BOOLEAN DEFAULT 1", "tenant_ids": "TEXT DEFAULT ''"},
+    "users": {"perms": "TEXT", "all_tenants": "BOOLEAN DEFAULT 1", "tenant_ids": "TEXT DEFAULT ''",
+              "last_login": "DATETIME", "last_seen": "DATETIME"},
     "tenants": {"directory": "TEXT DEFAULT '{}'", "directory_ts": "DATETIME", "accesskey_user_enc": "TEXT DEFAULT ''"},
     "rules": {"ucr_ids": "VARCHAR(1000) DEFAULT ''", "group_ids": "VARCHAR(1000) DEFAULT ''", "push": "BOOLEAN DEFAULT 1"},
 }
