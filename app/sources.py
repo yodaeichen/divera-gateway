@@ -16,6 +16,7 @@ import httpx
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 MAX_PER_POLL = 50
+PREVIEW_COUNT = 5
 TIMEOUT = 20
 
 
@@ -81,13 +82,13 @@ def _resolve_folder(cfg: dict, headers: dict) -> str:
     return folder
 
 
-def _graph_messages(cfg: dict, params: dict) -> list[dict]:
+def _graph_messages(cfg: dict, params: dict, limit: int = MAX_PER_POLL) -> list[dict]:
     token = _graph_token(cfg)
     headers = {"Authorization": f"Bearer {token}", "Prefer": 'outlook.body-content-type="text"'}
     folder = _resolve_folder(cfg, headers)
     url = f"{GRAPH}/users/{cfg['mailbox']}/mailFolders/{folder}/messages"
     items: list[dict] = []
-    while url and len(items) < MAX_PER_POLL:
+    while url and len(items) < limit:
         resp = httpx.get(url, params=params, headers=headers, timeout=TIMEOUT)
         if resp.status_code != 200:
             try:
@@ -98,7 +99,7 @@ def _graph_messages(cfg: dict, params: dict) -> list[dict]:
         data = resp.json()
         items.extend(data.get("value", []))
         url, params = data.get("@odata.nextLink"), None
-    return items[:MAX_PER_POLL]
+    return items[:limit]
 
 
 def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
@@ -126,9 +127,24 @@ def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
     return messages, state
 
 
-def test_m365(cfg: dict) -> str:
-    found = _graph_messages(cfg, {"$top": "1", "$select": "id"})
-    return f"Verbindung in Ordnung, Ordner erreichbar ({len(found)} Nachricht gelesen)."
+def _naive_utc(value: dt.datetime) -> dt.datetime:
+    value = value.replace(tzinfo=dt.timezone.utc) if value.tzinfo is None else value.astimezone(dt.timezone.utc)
+    return value.replace(tzinfo=None)
+
+
+def test_m365(cfg: dict) -> dict:
+    """Verbindungstest: liefert die neuesten Nachrichten des Ordners zur Kontrolle."""
+    raw = _graph_messages(cfg, {"$top": str(PREVIEW_COUNT), "$orderby": "receivedDateTime desc",
+                                "$select": "subject,from,receivedDateTime,bodyPreview"}, limit=PREVIEW_COUNT)
+    items = []
+    for item in raw:
+        received = item.get("receivedDateTime", "")
+        items.append({
+            "ts": _naive_utc(dt.datetime.fromisoformat(received.replace("Z", "+00:00"))) if received else None,
+            "from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
+            "subject": item.get("subject") or "", "preview": (item.get("bodyPreview") or "")[:200],
+        })
+    return {"message": "Verbindung in Ordnung, Anmeldung und Ordner erreichbar.", "items": items}
 
 
 # ---------- IMAP ----------
@@ -193,10 +209,28 @@ def poll_imap(cfg: dict, state: dict) -> tuple[list[dict], dict]:
             pass
 
 
-def test_imap(cfg: dict) -> str:
+def test_imap(cfg: dict) -> dict:
+    """Verbindungstest: liefert Absender, Betreff und Datum der neuesten Nachrichten."""
     conn = _imap_connect(cfg)
-    conn.logout()
-    return "Verbindung in Ordnung, Anmeldung und Ordner erreichbar."
+    items = []
+    try:
+        for uid in reversed(_imap_uids(conn, "ALL")[-PREVIEW_COUNT:]):
+            status, data = conn.uid("fetch", str(uid), "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
+            if status != "OK" or not data or not isinstance(data[0], tuple):
+                continue
+            mail = email.message_from_bytes(data[0][1], policy=policy.default)
+            try:
+                ts = _naive_utc(parsedate_to_datetime(str(mail["Date"])))
+            except (TypeError, ValueError):
+                ts = None
+            items.append({"ts": ts, "from": parseaddr(str(mail.get("From", "")))[1],
+                          "subject": str(mail.get("Subject", "")), "preview": ""})
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+    return {"message": "Verbindung in Ordnung, Anmeldung und Ordner erreichbar.", "items": items}
 
 
 POLLERS = {"m365": poll_m365, "imap": poll_imap}

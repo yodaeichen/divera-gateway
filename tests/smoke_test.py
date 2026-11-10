@@ -66,6 +66,17 @@ with TestClient(app, base_url="http://testserver") as c:
     assert r.json() == {"ok": True, "matched": 1}, r.text
     assert c.post(f"/hook/{hook}", json={"subject": "nix", "body": "x"}).json()["matched"] == 0
     assert c.post("/hook/falsch", json={}).status_code == 404
+    assert "nix" in c.post("/sources/2/test", data={"csrf": tok}).text
+    c.post(f"/hook/{hook}", data={"subject": "Formular", "geraet": "BMZ-7"})
+    last = c.post("/sources/2/test", data={"csrf": tok}).text
+    assert "Letzter Empfang" in last and "{geraet}" in last and "BMZ-7" in last
+    import datetime as dt
+    sources.TESTERS["m365"] = lambda cfg: {"message": "Verbindung in Ordnung", "items": [
+        {"ts": dt.datetime(2026, 11, 10, 9, 0), "from": "ls@x.de", "subject": "Probealarm <b>", "preview": "Textanfang"}]}
+    shown = c.post("/sources/1/test", data={"csrf": tok}).text
+    assert "Probealarm &lt;b&gt;" in shown and "10.11.2026 10:00:00" in shown and "Textanfang" in shown
+    sources.TESTERS["m365"] = lambda cfg: (_ for _ in ()).throw(RuntimeError("Ordner 'X' nicht gefunden"))
+    assert "Test fehlgeschlagen" in c.post("/sources/1/test", data={"csrf": tok}).text
     logs = c.get("/logs").text
     assert "Testmodus, nicht gesendet" in logs and "BMZ-7" in logs and "ignoriert" in logs
     assert "boese" not in logs and "geheim123" not in logs

@@ -268,12 +268,16 @@ async def source_save(request: Request, db: Session = Depends(get_db), user: m.U
 async def source_test(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     await read_form(request)
     source = need(db.get(m.Source, sid))
-    try:
-        result = await asyncio.to_thread(sources.TESTERS[source.type], source.config)
-        flash(request, f"{source.name}: {result}")
-    except Exception as exc:
-        flash(request, f"{source.name}: Test fehlgeschlagen ({type(exc).__name__}: {str(exc)[:300]})", "err")
-    return go(f"/tenants/{source.tenant_id}")
+    result, error = None, ""
+    if source.type == "webhook":
+        result = {"last": json.loads(source.state or "{}").get("last")}
+    else:
+        try:
+            result = await asyncio.to_thread(sources.TESTERS[source.type], source.config)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {str(exc)[:300]}"
+    return page(request, "source_test.html", user, tenant=source.tenant, source=source, result=result, error=error,
+                base_url=str(request.base_url))
 
 
 @app.post("/sources/{sid}/token")
@@ -463,6 +467,11 @@ async def webhook(token: str, request: Request, db: Session = Depends(get_db)):
         "body": str(data.get("body") or data.get("text") or data.get("message") or (raw.decode("utf-8", "replace") if not data else "")),
         "date": m.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    # Letzten Empfang für die Kontrollansicht merken (gekürzt, ohne den vollständigen Text)
+    source.state = json.dumps({"last": {
+        "ts": dt.datetime.now(TZ).strftime("%d.%m.%Y %H:%M:%S"), "from": msg["from"][:200], "subject": msg["subject"][:300],
+        "preview": msg["body"][:200], "fields": {k: str(v)[:100] for k, v in list(extra.items())[:30]}}})
+    db.commit()
     matched = await asyncio.to_thread(_webhook_process, source.id, msg)
     return JSONResponse({"ok": True, "matched": matched})
 

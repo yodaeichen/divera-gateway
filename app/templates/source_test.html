@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ 'Letzter Empfang' if source.type == 'webhook' else 'Verbindungstest' }}: {{ source.name }} <span class="hint">({{ tenant.name }})</span></h1>
+{% if error %}
+<div class="flash err">Test fehlgeschlagen: {{ error }}</div>
+{% elif source.type == 'webhook' %}
+<div class="card">
+  {% if result.last %}
+  <table>
+    <tr><th>Empfangen</th><td>{{ result.last.ts }}</td></tr>
+    <tr><th>Absender</th><td>{{ result.last.from }}</td></tr>
+    <tr><th>Betreff</th><td><strong>{{ result.last.subject }}</strong></td></tr>
+    <tr><th>Textanfang</th><td class="detail">{{ result.last.preview }}</td></tr>
+    {% for k, v in result.last.fields.items() %}<tr><th><code>{{ '{' ~ k ~ '}' }}</code></th><td>{{ v }}</td></tr>{% endfor %}
+  </table>
+  <p class="hint">Die Feldnamen links kannst du so als Platzhalter in Regeln verwenden.</p>
+  {% else %}
+  <p>Seit dem Anlegen oder letzten Speichern der Quelle ist noch nichts eingegangen.</p>
+  {% endif %}
+  <p class="hint">Adresse dieser Quelle: <code>{{ base_url }}hook/{{ source.webhook_token }}</code></p>
+</div>
+{% else %}
+<div class="flash">{{ result.message }}</div>
+<div class="card">
+  <h2>Die neuesten Nachrichten im Ordner</h2>
+  <table>
+  <tr><th>Empfangen</th><th>Absender</th><th>Betreff</th>{% if source.type == 'm365' %}<th>Textanfang</th>{% endif %}</tr>
+  {% for i in result['items'] %}
+  <tr><td style="white-space:nowrap">{{ i.ts|localtime if i.ts else '' }}</td><td>{{ i.from }}</td><td><strong>{{ i.subject }}</strong></td>{% if source.type == 'm365' %}<td class="detail">{{ i.preview }}</td>{% endif %}</tr>
+  {% else %}
+  <tr><td colspan="4">Der Ordner ist leer.</td></tr>
+  {% endfor %}
+  </table>
+  <p class="hint">Nur zur Kontrolle angezeigt, nichts davon wird gespeichert oder an DIVERA übergeben.</p>
+</div>
+{% endif %}
+<p><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zum Kunden</a> <a class="btn light" href="/sources/{{ source.id }}/edit">Quelle bearbeiten</a></p>
+{% endblock %}

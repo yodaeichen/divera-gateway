@@ -22,8 +22,8 @@
       {% else %}Letzte Abfrage: {{ s.last_poll|localtime }}{% endif %}
     </td>
     <td style="white-space:nowrap">
-      {% if s.type != 'webhook' %}<form class="inline" method="post" action="/sources/{{ s.id }}/test"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Verbindung testen</button></form>
-      {% else %}<form class="inline" method="post" action="/sources/{{ s.id }}/token"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Adresse erneuern</button></form>{% endif %}
+      <form class="inline" method="post" action="/sources/{{ s.id }}/test"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">{{ 'Letzter Empfang' if s.type == 'webhook' else 'Verbindung testen' }}</button></form>
+      {% if s.type == 'webhook' %}<form class="inline" method="post" action="/sources/{{ s.id }}/token"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Adresse erneuern</button></form>{% endif %}
       <form class="inline" method="post" action="/sources/{{ s.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form>
     </td>
   </tr>
