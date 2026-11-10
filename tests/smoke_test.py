@@ -339,6 +339,113 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "mindestens 12" in r.text
     c.post("/users/save", data={"csrf": tok, "username": "zwei", "password": "lang-genug-12345"})
     assert "zwei" in c.get("/users").text
+
+    # ---------- Berechtigungen ----------
+    from app import access
+    with m.SessionLocal() as db:
+        admin = db.query(m.User).filter_by(username="admin").one()
+        assert admin.perms is None and access.role_of(admin) == "Administrator" and access.sees_all(admin), "altes Konto bleibt Administrator"
+        zwei = db.query(m.User).filter_by(username="zwei").one()
+        assert access.perms_of(zwei) == {"tenants": 1, "sources": 0, "rules": 0, "logs": 0, "users": 0, "send": False} and not access.sees_all(zwei)
+    assert access.clean({"tenants": 0, "sources": 7, "logs": 2, "users": 1, "send": 1}) == {"tenants": 1, "sources": 0, "rules": 0, "logs": 0, "users": 0, "send": True}
+
+    c.post("/tenants/save", data={"csrf": tok, "name": "Andere Wehr", "accesskey": "andererkey", "active": "on", "test_mode": "on"})
+    c.post("/rules/save", data={"csrf": tok, "tenant_id": "2", "name": "Fremdregel", "match_subject": "alarm", "active": "on", "stop": "on"})
+    c.post("/hook/%s" % hook, json={"subject": "Alarm Eigen", "body": body})
+    with m.SessionLocal() as db:
+        db.add(m.Log(tenant_id=2, tenant_name="Andere Wehr", subject="GEHEIM-FREMD", status="test")); db.commit()
+        other_rule = db.query(m.Rule).filter_by(name="Fremdregel").one().id
+    form_html = c.get("/users/new").text
+    assert 'name="p_rules"' in form_html and "Administrator: darf alles" in form_html and 'name="tenant" value="2"' in form_html and "users.js" in form_html
+    VIEW = {"csrf": tok, "p_tenants": "1", "p_sources": "1", "p_rules": "1", "p_logs": "1", "p_users": "0"}
+    c.post("/users/save", data=dict(VIEW, username="leser", password="leser-passwort-1", tenant=["1"]))
+    c.post("/users/save", data=dict(VIEW, username="bearb", password="bearb-passwort-1", p_sources="2", p_rules="2", p_send="on", tenant=["1"]))
+    c.post("/users/save", data=dict(VIEW, username="eigen", password="eigen-passwort-1", p_rules="2", p_logs="0", all_tenants="on"))
+    listing = c.get("/users").text
+    assert "Betrachter" in listing and "Bearbeiter" in listing and "Angepasst" in listing and "FF Musterstadt" in listing
+    with m.SessionLocal() as db:
+        leser = db.query(m.User).filter_by(username="leser").one()
+        assert access.role_of(leser) == "Betrachter" and access.tenant_ids(leser) == {1} and not access.sees_all(leser)
+        leser_id, admin_id = leser.id, db.query(m.User).filter_by(username="admin").one().id
+    # wer Rechte verwaltet, sieht immer alles; der letzte Verwalter lässt sich nicht entmachten
+    c.post("/users/save", data=dict(VIEW, username="chef2", password="chef2-passwort-1", p_users="2", tenant=["1"]))
+    with m.SessionLocal() as db:
+        chef2 = db.query(m.User).filter_by(username="chef2").one()
+        assert chef2.all_tenants is True and access.sees_all(chef2); chef2_id = chef2.id
+    c.post(f"/users/{chef2_id}/delete", data={"csrf": tok})
+    r = c.post("/users/save", data=dict(VIEW, id=str(admin_id)))
+    assert "mindestens ein Benutzer übrig bleiben" in r.text
+    with m.SessionLocal() as db:
+        assert db.get(m.User, admin_id).perms is None, "Admin unverändert"
+    assert "Leer lassen" in c.post("/users/save", data=dict(VIEW, id=str(leser_id), password="kurz", tenant=["1"])).text
+
+    def login(name, password):
+        client = TestClient(app, base_url="http://testserver")
+        t = csrf(client.get("/login").text)
+        page_ = client.post("/login", data={"csrf": t, "username": name, "password": password})
+        return client, csrf(page_.text), page_.text
+
+    # Betrachter, nur Kunde 1
+    v, vt, home = login("leser", "leser-passwort-1")
+    assert "FF Musterstadt" in home and "Andere Wehr" not in home and "Kunde anlegen" not in home and "Jetzt abrufen" not in home
+    assert "GEHEIM-FREMD" not in home and "Alarm Eigen" in home and ">Benutzer<" not in home and "Mein Konto" in home
+    assert v.get("/tenants/2").status_code == 404 and v.get(f"/rules/{other_rule}/edit").status_code == 404
+    t1 = v.get("/tenants/1").text
+    assert "Kunde bearbeiten" not in t1 and "Regel anlegen" not in t1 and "Schlüssel prüfen" not in t1 and "/hook/" not in t1
+    assert "Empfänger aus DIVERA laden" not in t1 and "Verbindung testen" in t1 and "Löschen" not in t1 and "/sources/new" not in t1
+    for url in ("/tenants/1/edit", "/tenants/new", "/tenants/1/rules/new", "/sources/1/edit", "/users", "/users/new"):
+        resp = v.get(url); assert resp.status_code == 403 and "Keine Berechtigung" in resp.text, url
+    for url, data in (("/tenants/save", {"id": "1", "name": "Gekapert"}), ("/rules/save", dict(RULE)), ("/rules/1/delete", {}),
+                      ("/rules/send-test", dict(RULE, t_subject="Alarm", t_body=body, confirm="ja")), ("/tenants/1/poll", {}),
+                      ("/sources/1/process", {"ref": "x"}), ("/sources/1/delete", {}), ("/sources/2/token", {}), ("/sources/1/suggest", {"ref": "x"}),
+                      ("/tenants/1/directory", {}), ("/tenants/1/keycheck", {}), ("/tenants/1/delete", {}),
+                      ("/users/save", dict(VIEW, id=str(leser_id), p_users="2")), (f"/users/{admin_id}/delete", {})):
+        resp = v.post(url, data=dict(data, csrf=vt)); assert resp.status_code == 403, (url, resp.status_code)
+    with m.SessionLocal() as db:
+        assert db.get(m.Tenant, 1).name == "FF Musterstadt" and db.get(m.Rule, 1) is not None and db.get(m.User, admin_id) is not None
+        assert access.perms_of(db.get(m.User, leser_id))["users"] == 0
+    ruleview = v.get("/rules/1/edit").text
+    assert "Nur Ansicht" in ruleview and ">Speichern<" not in ruleview and "Testweise an DIVERA senden" not in ruleview and "Prüfen ohne Speichern" in ruleview
+    assert v.post("/rules/preview", data=dict(RULE, csrf=vt, t_subject="Alarm", t_body=body)).json()["match"] is True
+    assert v.post("/rules/preview", data=dict(RULE, csrf=vt, id=str(other_rule), t_subject="Alarm", t_body=body)).status_code == 404
+    assert v.post("/rules/preview", data={"csrf": vt, "tenant_id": "2", "name": "x", "t_subject": "a"}).status_code == 404
+    vlogs = v.get("/logs").text
+    assert "Alarm Eigen" in vlogs and "GEHEIM-FREMD" not in vlogs and "Andere Wehr" not in vlogs
+    assert "GEHEIM-FREMD" not in v.get("/logs?tenant=2").text
+    stest = v.post("/sources/2/test", data={"csrf": vt}).text
+    assert "Letzter Empfang" in stest and "Regel daraus vorschlagen" not in stest and "/hook/" not in stest
+    assert "stimmt nicht" in v.post("/account", data={"csrf": vt, "current": "falsch", "password": "neues-passwort-12"}).text
+    assert "Passwort geändert" in v.post("/account", data={"csrf": vt, "current": "leser-passwort-1", "password": "neues-passwort-12"}).text
+    assert "Kunden" in login("leser", "neues-passwort-12")[2]
+
+    # Bearbeiter, nur Kunde 1
+    e, et, _ = login("bearb", "bearb-passwort-1")
+    e1 = e.get("/tenants/1").text
+    assert "Regel anlegen" in e1 and "Jetzt abrufen" in e1 and "/hook/" in e1 and "Kunde bearbeiten" not in e1
+    assert "Regel gespeichert" in e.post("/rules/save", data=dict(RULE, csrf=et, name="Vom Bearbeiter", t_subject="Alarm", t_body=body)).text
+    assert e.post("/rules/save", data={"csrf": et, "tenant_id": "2", "name": "Eingeschleust"}).status_code == 404
+    assert e.post("/rules/save", data=dict(RULE, csrf=et, id=str(other_rule))).status_code == 404
+    assert e.post("/sources/save", data={"csrf": et, "tenant_id": "2", "type": "webhook", "name": "Fremd"}).status_code == 404
+    assert e.post("/tenants/2/poll", data={"csrf": et}).status_code == 404
+    assert e.post("/rules/save", data=dict(RULE, csrf=et, source_id="99")).status_code == 404
+    assert e.get("/tenants/1/edit").status_code == 403 and e.get("/users").status_code == 403
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, 1).name == "Vom Bearbeiter" and db.query(m.Rule).filter_by(name="Eingeschleust").count() == 0
+        assert db.get(m.Rule, other_rule).name == "Fremdregel"
+
+    # Angepasst: Regeln bearbeiten, kein Protokoll, alle Kunden
+    g, gt, ghome = login("eigen", "eigen-passwort-1")
+    assert "Andere Wehr" in ghome and "Letzte Ereignisse" not in ghome and ">Protokoll<" not in ghome
+    assert g.get("/logs").status_code == 403 and g.get(f"/rules/{other_rule}/edit").status_code == 200
+    assert "Protokoll dieses Kunden" not in g.get("/tenants/2").text
+
+    # Rechte wirken sofort, auch in laufenden Sitzungen
+    c.post("/users/save", data=dict(VIEW, id=str(leser_id), p_rules="0", tenant=["2"]))
+    assert v.get("/tenants/1").status_code == 404 and v.get(f"/rules/{other_rule}/edit").status_code == 403
+    assert "Regeln" not in v.get("/tenants/2").text.split("<main>")[1].replace("Regeln werden", "")
+    c.post(f"/users/{leser_id}/delete", data={"csrf": tok})
+    assert v.get("/", follow_redirects=False).status_code == 303, "gelöschter Benutzer ist abgemeldet"
+
     c.post("/logout", data={"csrf": tok})
     assert c.get("/logs", follow_redirects=False).status_code == 303
 

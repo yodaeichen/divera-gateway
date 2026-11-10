@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}DIVERA Gateway{% endblock %}</title>
 {% block head %}{% endblock %}
-<link rel="stylesheet" href="/static/style.css?v=6">
+<link rel="stylesheet" href="/static/style.css?v=16">
 </head>
 <body>
 {% if user %}
 <header>
   <div class="brand">DIVERA <span>Gateway</span></div>
-  <nav><a href="/">Kunden</a><a href="/logs">Protokoll</a><a href="/users">Benutzer</a></nav>
+  <nav><a href="/">Kunden</a>{% if perm.logs %}<a href="/logs">Protokoll</a>{% endif %}{% if perm.users == 2 %}<a href="/users">Benutzer</a>{% endif %}<a href="/account">Mein Konto</a></nav>
   <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Abmelden ({{ user.username }})</button></form>
 </header>
 {% endif %}

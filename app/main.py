@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as m
-from . import rules, sources, suggest, worker
+from . import access, rules, sources, suggest, worker
 from . import security as sec
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -78,6 +78,15 @@ async def _login_required(_request, _exc):
     return RedirectResponse("/login", status_code=303)
 
 
+@app.exception_handler(access.Denied)
+async def _denied(request: Request, exc: access.Denied):
+    if request.url.path == "/rules/preview":
+        return JSONResponse({"detail": exc.message}, status_code=403)
+    response = templates.TemplateResponse(request, "denied.html", {"message": exc.message, "user": None, "flash": None, "csrf": ""})
+    response.status_code = 403
+    return response
+
+
 def get_db():
     with m.SessionLocal() as db:
         yield db
@@ -108,8 +117,43 @@ def flash(request: Request, text: str, kind: str = "ok"):
     request.session["flash"] = [kind, text]
 
 
+def allow(*needs: str):
+    """Abhängigkeit für Seiten und Aktionen: angemeldet und mit den genannten Rechten, z. B. allow("rules:2", "send")."""
+    def dependency(request: Request, db: Session = Depends(get_db)) -> m.User:
+        user = current_user(request, db)
+        access.require(user, *needs)
+        return user
+    return dependency
+
+
+def tenant_for(db: Session, user: m.User, tenant_id) -> m.Tenant:
+    """Lädt einen Kunden nur, wenn der Benutzer ihn sehen darf. Fremde Kunden verhalten sich wie nicht vorhanden."""
+    tenant = db.get(m.Tenant, int(tenant_id))
+    if tenant is None or not access.allowed(user, tenant.id):
+        raise HTTPException(404, "Nicht gefunden")
+    return tenant
+
+
+def source_for(db: Session, user: m.User, source_id) -> m.Source:
+    source = need(db.get(m.Source, int(source_id)))
+    tenant_for(db, user, source.tenant_id)
+    return source
+
+
+def rule_for(db: Session, user: m.User, rule_id) -> m.Rule:
+    rule = need(db.get(m.Rule, int(rule_id)))
+    tenant_for(db, user, rule.tenant_id)
+    return rule
+
+
+def visible_tenants(db: Session, user: m.User) -> list[m.Tenant]:
+    tenants = db.scalars(select(m.Tenant).order_by(m.Tenant.name)).all()
+    return [t for t in tenants if access.allowed(user, t.id)]
+
+
 def page(request: Request, name: str, user: m.User | None = None, **ctx):
-    ctx.update(user=user, csrf=csrf_token(request), flash=request.session.pop("flash", None), types=SOURCE_TYPES)
+    ctx.update(user=user, csrf=csrf_token(request), flash=request.session.pop("flash", None), types=SOURCE_TYPES,
+               perm=access.perms_of(user) if user else {}, sees_all=access.sees_all(user) if user else False)
     return templates.TemplateResponse(request, name, ctx)
 
 
@@ -168,8 +212,10 @@ async def logout(request: Request):
 
 @app.get("/")
 def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    tenants = db.scalars(select(m.Tenant).order_by(m.Tenant.name)).all()
-    logs = db.scalars(select(m.Log).order_by(m.Log.id.desc()).limit(15)).all()
+    tenants = visible_tenants(db, user)
+    logs = []
+    if access.perms_of(user)["logs"]:
+        logs = db.scalars(select(m.Log).where(m.Log.tenant_id.in_([t.id for t in tenants])).order_by(m.Log.id.desc()).limit(15)).all()
     now, schedule = m.utcnow(), {}
     for tenant in tenants:  # letzter und nächster Abruf je Kunde, über alle aktiven Postfächer
         pollable = [s for s in tenant.sources if s.active and s.type in sources.POLLERS]
@@ -183,13 +229,15 @@ def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = De
 
 
 @app.get("/tenants/new")
-def tenant_new(request: Request, user: m.User = Depends(current_user)):
+def tenant_new(request: Request, user: m.User = Depends(allow("tenants:2"))):
+    if not access.sees_all(user):
+        raise access.Denied("Neue Kunden kann nur anlegen, wer alle Kunden sehen darf.")
     return page(request, "tenant_form.html", user, tenant=None)
 
 
 @app.get("/tenants/{tid}")
 def tenant_view(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    tenant = need(db.get(m.Tenant, tid))
+    tenant = tenant_for(db, user, tid)
     since = {}  # ab wann ein Microsoft-365-Postfach Nachrichten berücksichtigt
     for source in tenant.sources:
         stamp = json.loads(source.state or "{}").get("since") if source.type == "m365" else None
@@ -202,14 +250,16 @@ def tenant_view(tid: int, request: Request, db: Session = Depends(get_db), user:
 
 
 @app.get("/tenants/{tid}/edit")
-def tenant_edit(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    return page(request, "tenant_form.html", user, tenant=need(db.get(m.Tenant, tid)))
+def tenant_edit(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("tenants:2"))):
+    return page(request, "tenant_form.html", user, tenant=tenant_for(db, user, tid))
 
 
 @app.post("/tenants/save")
-async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("tenants:2"))):
     form = await read_form(request)
-    tenant = need(db.get(m.Tenant, int(form["id"]))) if form.get("id") else m.Tenant()
+    if not form.get("id") and not access.sees_all(user):
+        raise access.Denied("Neue Kunden kann nur anlegen, wer alle Kunden sehen darf.")
+    tenant = tenant_for(db, user, int(form["id"])) if form.get("id") else m.Tenant()
     tenant.name = text(form, "name", 120) or "Unbenannt"
     tenant.active = "active" in form
     tenant.test_mode = "test_mode" in form
@@ -226,10 +276,10 @@ async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.U
 
 
 @app.post("/tenants/{tid}/keycheck")
-async def tenant_keycheck(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def tenant_keycheck(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("tenants:2"))):
     """Prüft beide hinterlegten Schlüssel lesend gegen DIVERA und zeigt, was sie dürfen."""
     await read_form(request)
-    tenant = need(db.get(m.Tenant, tid))
+    tenant = tenant_for(db, user, tid)
     checks = []
     for label, enc in (("Alarm-Accesskey der Einheit", tenant.accesskey_enc), ("Persönlicher Accesskey", tenant.accesskey_user_enc)):
         if not enc:
@@ -244,10 +294,10 @@ async def tenant_keycheck(tid: int, request: Request, db: Session = Depends(get_
 
 
 @app.post("/tenants/{tid}/directory")
-async def tenant_directory(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def tenant_directory(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("tenants:2"))):
     """Lädt Personen und Gruppen der Einheit aus DIVERA für die Empfängerauswahl in Regeln."""
     await read_form(request)
-    tenant = need(db.get(m.Tenant, tid))
+    tenant = tenant_for(db, user, tid)
     try:
         directory = await asyncio.to_thread(rules.fetch_directory, rules.key_for(tenant))
     except Exception as exc:
@@ -260,10 +310,10 @@ async def tenant_directory(tid: int, request: Request, db: Session = Depends(get
 
 
 @app.post("/tenants/{tid}/poll")
-async def tenant_poll(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def tenant_poll(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
     """Fragt alle Postfächer eines Kunden sofort ab, ohne auf das Intervall zu warten."""
     form = await read_form(request)
-    tenant = need(db.get(m.Tenant, tid))
+    tenant = tenant_for(db, user, tid)
     back = "/" if form.get("back") == "home" else f"/tenants/{tid}"
     pollable = [s for s in tenant.sources if s.active and s.type in sources.POLLERS]
     if not tenant.active:
@@ -285,9 +335,9 @@ async def tenant_poll(tid: int, request: Request, db: Session = Depends(get_db),
 
 
 @app.post("/tenants/{tid}/delete")
-async def tenant_delete(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def tenant_delete(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("tenants:2"))):
     await read_form(request)
-    db.delete(need(db.get(m.Tenant, tid)))
+    db.delete(tenant_for(db, user, tid))
     db.commit()
     flash(request, "Kunde gelöscht.")
     return go("/")
@@ -297,29 +347,29 @@ async def tenant_delete(tid: int, request: Request, db: Session = Depends(get_db
 
 @app.get("/tenants/{tid}/sources/new")
 def source_new(tid: int, request: Request, type: str = "m365", db: Session = Depends(get_db),
-               user: m.User = Depends(current_user)):
+               user: m.User = Depends(allow("sources:2"))):
     if type not in SOURCE_TYPES:
         raise HTTPException(400, "Unbekannter Quelltyp")
-    return page(request, "source_form.html", user, tenant=need(db.get(m.Tenant, tid)), source=None, stype=type, cfg={})
+    return page(request, "source_form.html", user, tenant=tenant_for(db, user, tid), source=None, stype=type, cfg={})
 
 
 @app.get("/sources/{sid}/edit")
-def source_edit(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    source = need(db.get(m.Source, sid))
+def source_edit(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("sources:2"))):
+    source = source_for(db, user, sid)
     cfg = {k: v for k, v in source.config.items() if k not in ("client_secret", "password")}
     return page(request, "source_form.html", user, tenant=source.tenant, source=source, stype=source.type, cfg=cfg)
 
 
 @app.post("/sources/save")
-async def source_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def source_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("sources:2"))):
     form = await read_form(request)
     if form.get("id"):
-        source = need(db.get(m.Source, int(form["id"])))
+        source = source_for(db, user, int(form["id"]))
     else:
         stype = text(form, "type", 20)
         if stype not in SOURCE_TYPES:
             raise HTTPException(400, "Unbekannter Quelltyp")
-        source = m.Source(tenant_id=need(db.get(m.Tenant, int(form["tenant_id"]))).id, type=stype)
+        source = m.Source(tenant_id=tenant_for(db, user, int(form["tenant_id"])).id, type=stype)
         if stype == "webhook":
             source.webhook_token = secrets.token_urlsafe(32)
     source.name = text(form, "name", 120) or SOURCE_TYPES[source.type]
@@ -345,9 +395,9 @@ async def source_save(request: Request, db: Session = Depends(get_db), user: m.U
 
 
 @app.post("/sources/{sid}/test")
-async def source_test(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def source_test(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("sources:1"))):
     await read_form(request)
-    source = need(db.get(m.Source, sid))
+    source = source_for(db, user, sid)
     result, error = None, ""
     if source.type == "webhook":
         result = {"last": json.loads(source.state or "{}").get("last")}
@@ -369,10 +419,10 @@ def _process_one(source_id: int, msg: dict) -> int:
 
 
 @app.post("/sources/{sid}/process")
-async def source_process(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def source_process(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("sources:1", "send"))):
     """Übergibt eine im Verbindungstest gezeigte Nachricht jetzt an die Regeln. Im scharfen Betrieb wird wirklich gesendet."""
     form = await read_form(request)
-    source = need(db.get(m.Source, sid))
+    source = source_for(db, user, sid)
     if source.type not in sources.FETCHERS:
         raise HTTPException(400, "Für diese Quelle nicht möglich")
     if not source.tenant.active:
@@ -393,9 +443,9 @@ async def source_process(sid: int, request: Request, db: Session = Depends(get_d
 
 
 @app.post("/sources/{sid}/token")
-async def source_token(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def source_token(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("sources:2"))):
     await read_form(request)
-    source = need(db.get(m.Source, sid))
+    source = source_for(db, user, sid)
     if source.type == "webhook":
         source.webhook_token = secrets.token_urlsafe(32)
         db.commit()
@@ -404,9 +454,9 @@ async def source_token(sid: int, request: Request, db: Session = Depends(get_db)
 
 
 @app.post("/sources/{sid}/delete")
-async def source_delete(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def source_delete(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("sources:2"))):
     await read_form(request)
-    source = need(db.get(m.Source, sid))
+    source = source_for(db, user, sid)
     tid = source.tenant_id
     db.delete(source)
     db.commit()
@@ -478,35 +528,35 @@ def evaluate(rule: m.Rule, sample: dict) -> dict:
             "values": {k: v for k, v in (values or {}).items() if k != "body"}}
 
 
-def unsaved_rule(form, db: Session) -> m.Rule:
+def unsaved_rule(form, db: Session, user: m.User) -> m.Rule:
     """Regel nur im Speicher, damit ein Probelauf oder Fehler nichts an der Datenbank ändert."""
     rule = m.Rule()
     if form.get("id"):
-        existing = need(db.get(m.Rule, int(form["id"])))
+        existing = rule_for(db, user, int(form["id"]))
         rule.id, rule.tenant_id = existing.id, existing.tenant_id
     else:
-        rule.tenant_id = need(db.get(m.Tenant, int(form["tenant_id"]))).id
+        rule.tenant_id = tenant_for(db, user, int(form["tenant_id"])).id
     return rule
 
 
 @app.get("/tenants/{tid}/rules/new")
-def rule_new(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    return rule_page(request, user, need(db.get(m.Tenant, tid)), None)
+def rule_new(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:2"))):
+    return rule_page(request, user, tenant_for(db, user, tid), None)
 
 
 @app.get("/rules/{rid}/edit")
-def rule_edit(rid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    rule = need(db.get(m.Rule, rid))
+def rule_edit(rid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:1"))):
+    rule = rule_for(db, user, rid)
     return rule_page(request, user, rule.tenant, rule)
 
 
 @app.post("/rules/test")
-async def rule_test(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def rule_test(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:1"))):
     form = await read_form(request)
-    rule = unsaved_rule(form, db)
+    rule = unsaved_rule(form, db, user)
     error = apply_rule_form(rule, form, db)
     sample = read_sample(form)
-    tenant = need(db.get(m.Tenant, rule.tenant_id))
+    tenant = tenant_for(db, user, rule.tenant_id)
     if not error and not sample:
         error = "Zum Prüfen bitte unten eine Beispielnachricht eintragen."
     result = evaluate(rule, sample) if sample and not error else None
@@ -514,35 +564,35 @@ async def rule_test(request: Request, db: Session = Depends(get_db), user: m.Use
 
 
 @app.post("/rules/preview")
-async def rule_preview(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def rule_preview(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:1"))):
     """Live-Ansicht: wertet die gerade im Formular stehenden Werte aus. Speichert und sendet nichts."""
     form = await read_form(request)
-    rule = unsaved_rule(form, db)
+    rule = unsaved_rule(form, db, user)
     error = apply_rule_form(rule, form, db)
     sample = read_sample(form)
     if not sample:
         return JSONResponse({"state": "nosample"})
     data = rules.preview(rule, sample)
-    directory = directory_of(need(db.get(m.Tenant, rule.tenant_id)))
+    directory = directory_of(tenant_for(db, user, rule.tenant_id))
     def names(kind: str, ids: str) -> list[str]:
         lookup = {str(entry["id"]): entry["name"] for entry in directory[kind]}
         return [lookup.get(i, f"ID {i}") for i in rules.id_list(ids)]
     data.update(state="ok", form_error=error, persons=names("persons", rule.ucr_ids), groups=names("groups", rule.group_ids),
-                user_key=bool(need(db.get(m.Tenant, rule.tenant_id)).accesskey_user_enc))
+                user_key=bool(tenant_for(db, user, rule.tenant_id).accesskey_user_enc))
     return JSONResponse(data)
 
 
 @app.post("/rules/send-test")
-async def rule_send_test(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def rule_send_test(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:1", "send"))):
     """Sendet das Ergebnis der Regel für die Beispielnachricht wirklich an DIVERA, auch im Testmodus.
 
     Zwei Schritte: erst eine Bestätigungsseite mit genau dem, was gesendet würde, dann das Senden.
     """
     form = await read_form(request)
-    rule = unsaved_rule(form, db)
+    rule = unsaved_rule(form, db, user)
     error = apply_rule_form(rule, form, db)
     sample = read_sample(form)
-    tenant = need(db.get(m.Tenant, rule.tenant_id))
+    tenant = tenant_for(db, user, rule.tenant_id)
     if not error and not sample:
         error = "Zum Senden bitte unten eine Beispielnachricht eintragen."
     if not error and not tenant.accesskey_enc:
@@ -570,14 +620,14 @@ async def rule_send_test(request: Request, db: Session = Depends(get_db), user: 
 
 
 @app.post("/rules/save")
-async def rule_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def rule_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:2"))):
     form = await read_form(request)
-    draft = unsaved_rule(form, db)
+    draft = unsaved_rule(form, db, user)
     error = apply_rule_form(draft, form, db)
     sample = read_sample(form)
     if error:
-        return rule_page(request, user, need(db.get(m.Tenant, draft.tenant_id)), draft, sample=sample, error=error)
-    rule = need(db.get(m.Rule, draft.id)) if draft.id else m.Rule(tenant_id=draft.tenant_id)
+        return rule_page(request, user, tenant_for(db, user, draft.tenant_id), draft, sample=sample, error=error)
+    rule = rule_for(db, user, draft.id) if draft.id else m.Rule(tenant_id=draft.tenant_id)
     apply_rule_form(rule, form, db)
     db.add(rule)
     db.commit()
@@ -588,10 +638,10 @@ async def rule_save(request: Request, db: Session = Depends(get_db), user: m.Use
 
 
 @app.post("/sources/{sid}/suggest")
-async def rule_suggest(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def rule_suggest(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:2", "sources:1"))):
     """Erzeugt aus einer Nachricht der Quelle einen ungespeicherten Regelvorschlag."""
     form = await read_form(request)
-    source = need(db.get(m.Source, sid))
+    source = source_for(db, user, sid)
     if source.type == "webhook":
         last = json.loads(source.state or "{}").get("last")
         if not last:
@@ -614,9 +664,9 @@ async def rule_suggest(sid: int, request: Request, db: Session = Depends(get_db)
 
 
 @app.post("/rules/{rid}/delete")
-async def rule_delete(rid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def rule_delete(rid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:2"))):
     await read_form(request)
-    rule = need(db.get(m.Rule, rid))
+    rule = rule_for(db, user, rid)
     tid = rule.tenant_id
     db.delete(rule)
     db.commit()
@@ -628,45 +678,86 @@ async def rule_delete(rid: int, request: Request, db: Session = Depends(get_db),
 
 @app.get("/logs")
 def logs_view(request: Request, tenant: int | None = None, status: str = "", db: Session = Depends(get_db),
-              user: m.User = Depends(current_user)):
-    query = select(m.Log).order_by(m.Log.id.desc()).limit(300)
+              user: m.User = Depends(allow("logs:1"))):
+    tenants = visible_tenants(db, user)
+    visible = [t.id for t in tenants]
+    query = select(m.Log).where(m.Log.tenant_id.in_(visible)).order_by(m.Log.id.desc()).limit(300)
     if tenant:
         query = query.where(m.Log.tenant_id == tenant)
     if status:
         query = query.where(m.Log.status == status)
-    tenants = db.scalars(select(m.Tenant).order_by(m.Tenant.name)).all()
     return page(request, "logs.html", user, logs=db.scalars(query).all(), tenants=tenants, sel_tenant=tenant, sel_status=status)
 
 
+# ---------- Benutzer und Rechte ----------
+
+def admins_left(db: Session) -> int:
+    return sum(1 for u in db.scalars(select(m.User)) if access.perms_of(u)["users"] == 2)
+
+
+def user_form_page(request, user, db, target, **extra):
+    perms = access.perms_of(target) if target is not None and target.id else dict(access.PRESETS["viewer"])
+    return page(request, "user_form.html", user, target=target, tperms=perms, areas=access.AREAS, presets=access.PRESETS,
+                role_names=access.ROLE_NAMES, role_hints=access.ROLE_HINTS, send_hint=access.SEND_HINT,
+                tenants=db.scalars(select(m.Tenant).order_by(m.Tenant.name)).all(),
+                t_all=access.sees_all(target) if target is not None and target.id else False,
+                t_ids=access.tenant_ids(target) if target is not None and target.id else set(), **extra)
+
+
 @app.get("/users")
-def users_view(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    return page(request, "users.html", user, users=db.scalars(select(m.User).order_by(m.User.username)).all())
+def users_view(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
+    names = {t.id: t.name for t in db.scalars(select(m.Tenant))}
+    rows = [{"user": u, "role": access.role_of(u), "all": access.sees_all(u),
+             "tenants": [names[i] for i in sorted(access.tenant_ids(u)) if i in names]}
+            for u in db.scalars(select(m.User).order_by(m.User.username))]
+    return page(request, "users.html", user, rows=rows)
+
+
+@app.get("/users/new")
+def users_new(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
+    return user_form_page(request, user, db, None)
+
+
+@app.get("/users/{uid}/edit")
+def users_edit(uid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
+    return user_form_page(request, user, db, need(db.get(m.User, uid)))
 
 
 @app.post("/users/save")
-async def users_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def users_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
     form = await read_form(request)
     password = str(form.get("password", ""))
-    if len(password) < 12:
-        flash(request, "Das Passwort braucht mindestens 12 Zeichen.", "err")
-        return go("/users")
-    if form.get("id"):
-        target = need(db.get(m.User, int(form["id"])))
-    else:
+    target = need(db.get(m.User, int(form["id"]))) if form.get("id") else None
+    back = f"/users/{target.id}/edit" if target else "/users/new"
+    if target is None:
         username = text(form, "username", 80)
         if not username or db.scalar(select(m.User).where(m.User.username == username)):
             flash(request, "Benutzername fehlt oder ist schon vergeben.", "err")
-            return go("/users")
+            return go(back)
+        if len(password) < 12:
+            flash(request, "Das Passwort braucht mindestens 12 Zeichen.", "err")
+            return go(back)
         target = m.User(username=username)
-    target.password_hash = sec.hash_password(password)
+    elif password and len(password) < 12:
+        flash(request, "Das Passwort braucht mindestens 12 Zeichen. Leer lassen, um es nicht zu ändern.", "err")
+        return go(back)
+    if password:
+        target.password_hash = sec.hash_password(password)
+    perms, everything, ids = access.from_form(form)
+    target.perms, target.all_tenants, target.tenant_ids = json.dumps(perms), everything, ids
     db.add(target)
+    db.flush()
+    if admins_left(db) == 0:
+        db.rollback()
+        flash(request, "Nicht gespeichert: Es muss mindestens ein Benutzer übrig bleiben, der Benutzer und Rechte verwalten darf.", "err")
+        return go(back)
     db.commit()
     flash(request, f"Benutzer {target.username} gespeichert.")
     return go("/users")
 
 
 @app.post("/users/{uid}/delete")
-async def users_delete(uid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+async def users_delete(uid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
     await read_form(request)
     if uid == user.id:
         flash(request, "Du kannst dich nicht selbst löschen.", "err")
@@ -675,6 +766,26 @@ async def users_delete(uid: int, request: Request, db: Session = Depends(get_db)
         db.commit()
         flash(request, "Benutzer gelöscht.")
     return go("/users")
+
+
+@app.get("/account")
+def account_view(request: Request, user: m.User = Depends(current_user)):
+    return page(request, "account.html", user, role=access.role_of(user))
+
+
+@app.post("/account")
+async def account_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    form = await read_form(request)
+    if not sec.verify_password(str(form.get("current", "")), user.password_hash):
+        flash(request, "Das aktuelle Passwort stimmt nicht.", "err")
+    elif len(str(form.get("password", ""))) < 12:
+        flash(request, "Das neue Passwort braucht mindestens 12 Zeichen.", "err")
+    else:
+        user.password_hash = sec.hash_password(str(form["password"]))
+        db.add(user)
+        db.commit()
+        flash(request, "Passwort geändert.")
+    return go("/account")
 
 
 # ---------- Webhook-Eingang (ohne Anmeldung, Schutz über das Token in der Adresse) ----------

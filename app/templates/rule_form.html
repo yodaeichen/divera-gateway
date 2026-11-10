@@ -4,6 +4,7 @@
 <h1>{{ 'Regel bearbeiten' if saved else 'Regel anlegen' }} <span class="hint">({{ tenant.name }})</span></h1>
 
 {% if error %}<div class="flash err">{{ error }} Es wurde nichts gespeichert.</div>{% endif %}
+{% if perm.rules < 2 %}<div class="flash">Nur Ansicht: Du kannst die Regel ansehen und in der Live-Ansicht ausprobieren, aber nicht speichern.</div>{% endif %}
 {% if just_saved %}<div class="flash">Regel gespeichert.</div>{% endif %}
 {% if send_result %}
 <div class="flash {{ '' if send_result.ok else 'err' }}"><strong>{{ 'An DIVERA gesendet.' if send_result.ok else 'Senden fehlgeschlagen.' }}</strong> Antwort von DIVERA: {{ send_result.detail }}</div>
@@ -134,11 +135,11 @@
   <label>Text</label><textarea name="t_body" style="min-height:160px">{{ sample.body if sample else '' }}</textarea>
   <div class="actions">
     <button class="light" formaction="/rules/test">Prüfen ohne Speichern</button>
-    <button>Speichern</button>
-    <button class="light" formaction="/rules/send-test">Testweise an DIVERA senden …</button>
+    {% if perm.rules >= 2 %}<button>Speichern</button>{% endif %}
+    {% if perm.send %}<button class="light" formaction="/rules/send-test">Testweise an DIVERA senden …</button>{% endif %}
     <a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zum Kunden</a>
   </div>
-  <p class="hint">„Testweise an DIVERA senden" überträgt das Ergebnis für die Beispielnachricht wirklich, auch im Testmodus. Vorher erscheint eine Seite zur Bestätigung.</p>
+{% if perm.send %}<p class="hint">„Testweise an DIVERA senden" überträgt das Ergebnis für die Beispielnachricht wirklich, auch im Testmodus. Vorher erscheint eine Seite zur Bestätigung.</p>{% endif %}
 </div>
 </form>
 <aside id="live" class="card live"><h2>Live-Ansicht</h2><p class="hint">Wird geladen. Ohne JavaScript bitte „Prüfen ohne Speichern" verwenden.</p></aside>

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+{% set editing = target and target.id %}
+<h1>{{ 'Benutzer bearbeiten: ' ~ target.username if editing else 'Benutzer anlegen' }}</h1>
+<form method="post" action="/users/save" autocomplete="off" id="user-form">
+<div class="card">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if editing %}<input type="hidden" name="id" value="{{ target.id }}">{% else %}
+  <label>Benutzername</label><input type="text" name="username" required>{% endif %}
+  <label>{{ 'Neues Passwort' if editing else 'Passwort' }}</label>
+  <input type="password" name="password" minlength="12" autocomplete="new-password" {{ '' if editing else 'required' }}>
+  <p class="hint">Mindestens 12 Zeichen.{{ ' Leer lassen, um das Passwort nicht zu ändern.' if editing }}</p>
+</div>
+
+<div class="card">
+  <h2>Rechte</h2>
+  <label>Rolle als Vorlage</label>
+  <select id="preset" data-presets='{{ presets|tojson }}'>
+    <option value="">Einzelrechte wie unten eingestellt</option>
+    {% for key, name in role_names.items() %}<option value="{{ key }}" {{ 'selected' if tperms == presets[key] }}>{{ name }}: {{ role_hints[key] }}</option>{% endfor %}
+  </select>
+  <p class="hint">Eine Rolle füllt die Einzelrechte darunter aus. Du kannst sie danach einzeln anpassen; gespeichert wird immer das, was unten steht.</p>
+  <table style="margin-top:12px">
+    <tr><th>Bereich</th><th>Zugriff</th><th>Bedeutung</th></tr>
+    {% for area, label, levels, hint in areas %}
+    <tr><td><strong>{{ label }}</strong></td>
+      <td><select name="p_{{ area }}" class="perm">{% for value, text in levels %}<option value="{{ value }}" {{ 'selected' if tperms[area] == value }}>{{ text }}</option>{% endfor %}</select></td>
+      <td class="detail">{{ hint }}</td></tr>
+    {% endfor %}
+    <tr><td><strong>Von Hand an DIVERA senden</strong></td>
+      <td><label class="check"><input type="checkbox" name="p_send" class="perm" {{ 'checked' if tperms.send }}> erlaubt</label></td>
+      <td class="detail">{{ send_hint }}</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Kunden</h2>
+  <label class="check"><input type="checkbox" name="all_tenants" id="all-tenants" {{ 'checked' if t_all }}> Alle Kunden, auch künftig angelegte</label>
+  <p class="hint">Ohne diesen Haken sieht der Benutzer nur die unten angekreuzten Kunden mit ihren Quellen, Regeln und Protokolleinträgen. Alle anderen sind für ihn unsichtbar. Wer Benutzer und Rechte verwalten darf, sieht immer alle Kunden.</p>
+  <div class="picklist" id="tenant-list">
+    {% for t in tenants %}<label class="check"><input type="checkbox" name="tenant" value="{{ t.id }}" {{ 'checked' if t.id in t_ids }}> {{ t.name }}</label>
+    {% else %}<span class="hint">Noch kein Kunde angelegt.</span>{% endfor %}
+  </div>
+  <div class="actions"><button>Speichern</button><a class="btn light" href="/users">Abbrechen</a></div>
+</div>
+</form>
+<script src="/static/users.js?v=16" defer></script>
+{% endblock %}

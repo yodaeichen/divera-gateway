@@ -3,12 +3,14 @@
 <div class="row">
   <h1>{{ tenant.name }}
     {% if not tenant.active %}<span class="tag">inaktiv</span>{% elif tenant.test_mode %}<span class="tag test">Testmodus</span>{% else %}<span class="tag gesendet">scharf</span>{% endif %}</h1>
-  <div><form class="inline" method="post" action="/tenants/{{ tenant.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light" {{ 'disabled' if not tenant.active }}>Jetzt abrufen</button></form>
-  <form class="inline" method="post" action="/tenants/{{ tenant.id }}/keycheck"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Schlüssel prüfen</button></form>
-  <a class="btn light" href="/tenants/{{ tenant.id }}/edit">Kunde bearbeiten</a></div>
+  <div>{% if perm.send %}<form class="inline" method="post" action="/tenants/{{ tenant.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light" {{ 'disabled' if not tenant.active }}>Jetzt abrufen</button></form>{% endif %}
+  {% if perm.tenants >= 2 %}<form class="inline" method="post" action="/tenants/{{ tenant.id }}/keycheck"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Schlüssel prüfen</button></form>
+  <a class="btn light" href="/tenants/{{ tenant.id }}/edit">Kunde bearbeiten</a>{% endif %}</div>
 </div>
+{% if perm.tenants >= 2 %}
 {% if not tenant.accesskey_enc %}<div class="flash err">Es ist noch kein DIVERA-Accesskey hinterlegt.</div>{% endif %}
 {% if not tenant.accesskey_user_enc and tenant.rules|selectattr('kind', 'equalto', 'news')|selectattr('push', 'equalto', false)|list %}<div class="flash err">Mindestens eine Mitteilungs-Regel steht auf „ohne Push" und nutzt dafür die neuere DIVERA-Schnittstelle. Dafür fehlt der persönliche Accesskey: „Kunde bearbeiten" öffnen und eintragen.</div>{% endif %}
+{% endif %}
 
 {% if checks %}
 <div class="card">
@@ -25,30 +27,33 @@
 </div>
 {% endif %}
 
+{% if perm.sources >= 1 %}
 <div class="card">
   <div class="row"><h2>Quellen</h2>
-    <div>{% for key, label in types.items() %}<a class="btn light" href="/tenants/{{ tenant.id }}/sources/new?type={{ key }}">+ {{ label }}</a> {% endfor %}</div></div>
+    <div>{% if perm.sources >= 2 %}{% for key, label in types.items() %}<a class="btn light" href="/tenants/{{ tenant.id }}/sources/new?type={{ key }}">+ {{ label }}</a> {% endfor %}{% endif %}</div></div>
   <table>
   <tr><th>Name</th><th>Typ</th><th>Zustand</th><th></th></tr>
   {% for s in tenant.sources %}
   <tr>
-    <td><a href="/sources/{{ s.id }}/edit"><strong>{{ s.name }}</strong></a>{% if not s.active %} <span class="tag">inaktiv</span>{% endif %}</td>
+    <td>{% if perm.sources >= 2 %}<a href="/sources/{{ s.id }}/edit"><strong>{{ s.name }}</strong></a>{% else %}<strong>{{ s.name }}</strong>{% endif %}{% if not s.active %} <span class="tag">inaktiv</span>{% endif %}</td>
     <td>{{ types[s.type] }}</td>
     <td>
-      {% if s.type == 'webhook' %}<code>{{ base_url }}hook/{{ s.webhook_token }}</code>
+      {% if s.type == 'webhook' %}{% if perm.sources >= 2 %}<code>{{ base_url }}hook/{{ s.webhook_token }}</code>{% else %}<span class="hint">Adresse nur mit Bearbeitungsrecht sichtbar</span>{% endif %}
       {% elif s.last_error %}<span class="tag fehler">Fehler</span> <span class="hint">{{ s.last_error }}</span>
       {% else %}Letzte Abfrage: {{ s.last_poll|localtime }}{% if since.get(s.id) %}<br><span class="hint">verarbeitet Nachrichten, die ab {{ since[s.id]|localtime }} eingegangen sind</span>{% endif %}{% endif %}
     </td>
     <td style="white-space:nowrap">
       <form class="inline" method="post" action="/sources/{{ s.id }}/test"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">{{ 'Letzter Empfang' if s.type == 'webhook' else 'Verbindung testen' }}</button></form>
-      {% if s.type == 'webhook' %}<form class="inline" method="post" action="/sources/{{ s.id }}/token"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Adresse erneuern</button></form>{% endif %}
-      <form class="inline" method="post" action="/sources/{{ s.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form>
+      {% if perm.sources >= 2 %}{% if s.type == 'webhook' %}<form class="inline" method="post" action="/sources/{{ s.id }}/token"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Adresse erneuern</button></form>{% endif %}
+      <form class="inline" method="post" action="/sources/{{ s.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form>{% endif %}
     </td>
   </tr>
   {% else %}<tr><td colspan="4">Noch keine Quelle.</td></tr>{% endfor %}
   </table>
 </div>
+{% endif %}
 
+{% if perm.tenants >= 2 %}
 <div class="card">
   <div class="row"><h2>Empfänger aus DIVERA</h2>
     <form method="post" action="/tenants/{{ tenant.id }}/directory"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Empfänger aus DIVERA laden</button></form></div>
@@ -58,8 +63,11 @@
   <p class="hint">Holt Namen und IDs der Personen und Gruppen der Einheit, damit du sie in Regeln ankreuzen kannst. Nach Änderungen in DIVERA einfach neu laden.</p>
 </div>
 
+{% endif %}
+
+{% if perm.rules >= 1 %}
 <div class="card">
-  <div class="row"><h2>Regeln</h2><a class="btn" href="/tenants/{{ tenant.id }}/rules/new">Regel anlegen</a></div>
+  <div class="row"><h2>Regeln</h2>{% if perm.rules >= 2 %}<a class="btn" href="/tenants/{{ tenant.id }}/rules/new">Regel anlegen</a>{% endif %}</div>
   <table>
   <tr><th>Rang</th><th>Name</th><th>Quelle</th><th>Bedingungen</th><th>Ziel</th><th></th></tr>
   {% for r in tenant.rules %}
@@ -69,11 +77,12 @@
     <td>{{ r.source.name if r.source else 'alle' }}</td>
     <td class="detail">{% if r.match_from %}Absender: {{ r.match_from|replace(';', ' oder ') }}<br>{% endif %}{% if r.match_subject %}Betreff: {{ r.match_subject|replace(';', ' oder ') }}<br>{% endif %}{% if r.match_body %}Text: {{ r.match_body|replace(';', ' oder ') }}<br>{% endif %}{% if r.extract_regex %}mit Ausdrücken{% endif %}</td>
     <td>{{ ('Mitteilung' ~ ('' if r.push is none or r.push else ' ohne Push')) if r.kind == 'news' else 'Alarm' }}{% if r.ric %}<br><span class="hint">RIC {{ r.ric }}</span>{% endif %}{% if r.group_ids %}<br><span class="hint">{{ r.group_ids.split(',')|length }} Gruppe(n)</span>{% endif %}{% if r.ucr_ids %}<br><span class="hint">{{ r.ucr_ids.split(',')|length }} Person(en)</span>{% endif %}</td>
-    <td><form class="inline" method="post" action="/rules/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form></td>
+    <td>{% if perm.rules >= 2 %}<form class="inline" method="post" action="/rules/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form>{% endif %}</td>
   </tr>
   {% else %}<tr><td colspan="6">Noch keine Regel. Ohne Regel wird nichts an DIVERA übergeben.</td></tr>{% endfor %}
   </table>
   <p class="hint">Regeln werden nach Rang geprüft, kleinste Zahl zuerst.</p>
 </div>
-<p><a href="/logs?tenant={{ tenant.id }}">Protokoll dieses Kunden</a></p>
+{% endif %}
+{% if perm.logs %}<p><a href="/logs?tenant={{ tenant.id }}">Protokoll dieses Kunden</a></p>{% endif %}
 {% endblock %}

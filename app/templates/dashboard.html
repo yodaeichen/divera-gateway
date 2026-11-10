@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block head %}<meta http-equiv="refresh" content="30">{% endblock %}
 {% block content %}
-<div class="row"><h1>Kunden</h1><a class="btn" href="/tenants/new">Kunde anlegen</a></div>
+<div class="row"><h1>Kunden</h1>{% if perm.tenants >= 2 and sees_all %}<a class="btn" href="/tenants/new">Kunde anlegen</a>{% endif %}</div>
 <div class="card">
 <table>
 <tr><th>Name</th><th>Quellen</th><th>Regeln</th><th>Status</th><th>Letzter Abruf</th><th>Nächster Abruf</th><th></th></tr>
@@ -16,17 +16,19 @@
   <td>{% if not plan.next %}<span class="hint">{{ 'Kunde inaktiv' if not t.active else 'kein Postfach' }}</span>
       {% elif plan.due %}läuft gerade an{% else %}{{ plan.next|localtime }}{% endif %}
       {% if plan.interval %}<br><span class="hint">alle {{ plan.interval }} Sekunden</span>{% endif %}</td>
-  <td style="text-align:right"><form method="post" action="/tenants/{{ t.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="home">
-    <button class="light" {{ 'disabled' if not t.active }}>Jetzt abrufen</button></form></td>
+  <td style="text-align:right">{% if perm.send %}<form method="post" action="/tenants/{{ t.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="home">
+    <button class="light" {{ 'disabled' if not t.active }}>Jetzt abrufen</button></form>{% endif %}</td>
 </tr>
 {% else %}
-<tr><td colspan="7">Noch kein Kunde angelegt.</td></tr>
+<tr><td colspan="7">{{ 'Noch kein Kunde angelegt.' if sees_all else 'Dir ist noch kein Kunde freigegeben.' }}</td></tr>
 {% endfor %}
 </table>
 <p class="hint">Diese Seite lädt sich alle 30 Sekunden neu.</p>
 </div>
+{% if perm.logs %}
 <div class="card">
   <div class="row"><h2>Letzte Ereignisse</h2><a href="/logs">Ganzes Protokoll</a></div>
   {% include "_logtable.html" %}
 </div>
+{% endif %}
 {% endblock %}

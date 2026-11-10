@@ -1,30 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Benutzer</h1>
+<div class="row"><h1>Benutzer und Rechte</h1><a class="btn" href="/users/new">Benutzer anlegen</a></div>
 <div class="card">
 <table>
-<tr><th>Benutzername</th><th>Neues Passwort setzen</th><th></th></tr>
-{% for u in users %}
+<tr><th>Benutzername</th><th>Rolle</th><th>Kunden</th><th></th></tr>
+{% for r in rows %}
 <tr>
-  <td><strong>{{ u.username }}</strong>{% if u.id == user.id %} <span class="tag">du</span>{% endif %}</td>
-  <td><form method="post" action="/users/save" style="display:flex;gap:8px">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}">
-    <input type="password" name="password" minlength="12" autocomplete="new-password" placeholder="mindestens 12 Zeichen" required><button class="light">Setzen</button></form></td>
-  <td>{% if u.id != user.id %}<form method="post" action="/users/{{ u.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form>{% endif %}</td>
+  <td><a href="/users/{{ r.user.id }}/edit"><strong>{{ r.user.username }}</strong></a>{% if r.user.id == user.id %} <span class="tag">du</span>{% endif %}</td>
+  <td>{{ r.role }}</td>
+  <td>{% if r.all %}alle{% elif r.tenants %}{{ r.tenants|join(', ') }}{% else %}<span class="tag fehler">keiner freigegeben</span>{% endif %}</td>
+  <td style="white-space:nowrap"><a class="btn light" href="/users/{{ r.user.id }}/edit">Bearbeiten</a>
+    {% if r.user.id != user.id %}<form class="inline" method="post" action="/users/{{ r.user.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form>{% endif %}</td>
 </tr>
 {% endfor %}
 </table>
-</div>
-<div class="card">
-  <h2>Benutzer anlegen</h2>
-  <form method="post" action="/users/save" autocomplete="off">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <div class="grid">
-      <div><label>Benutzername</label><input type="text" name="username" required></div>
-      <div><label>Passwort</label><input type="password" name="password" minlength="12" autocomplete="new-password" required></div>
-    </div>
-    <div class="actions"><button>Anlegen</button></div>
-  </form>
-  <p class="hint">Alle Benutzer dürfen alle Kunden verwalten.</p>
+<p class="hint">Jeder Benutzer kann sein eigenes Passwort unter „Mein Konto" ändern.</p>
 </div>
 {% endblock %}
