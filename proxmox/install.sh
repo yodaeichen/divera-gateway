@@ -28,7 +28,6 @@ main() {
   for tool in pct pveam pvesh pvesm; do
     command -v "$tool" >/dev/null || fail "'$tool' nicht gefunden. Dieses Skript läuft nur auf einem Proxmox-VE-Host."
   done
-  case "$REPO" in yodaeichen/*) fail "Im Skript steht noch der Platzhalter yodaeichen. Bitte durch den GitHub-Namen ersetzen oder REPO=name/divera-gateway setzen." ;; esac
   if [ "$IP" != "dhcp" ] && [ -z "$GW" ]; then fail "Bei fester IP bitte auch GW=<Gateway> angeben."; fi
 
   CTID="${CTID:-$(pvesh get /cluster/nextid)}"
