@@ -8,7 +8,7 @@
   <a class="btn light" href="/tenants/{{ tenant.id }}/edit">Kunde bearbeiten</a></div>
 </div>
 {% if not tenant.accesskey_enc %}<div class="flash err">Es ist noch kein DIVERA-Accesskey hinterlegt.</div>{% endif %}
-{% if not tenant.accesskey_user_enc and tenant.rules|selectattr('kind', 'equalto', 'news')|selectattr('ric', 'equalto', '')|list %}<div class="flash err">Mindestens eine Mitteilungs-Regel nutzt die neuere DIVERA-Schnittstelle (ohne Push oder mit angekreuzten Empfängern). Dafür fehlt der persönliche Accesskey: „Kunde bearbeiten" öffnen und eintragen.</div>{% endif %}
+{% if not tenant.accesskey_user_enc and tenant.rules|selectattr('kind', 'equalto', 'news')|selectattr('push', 'equalto', false)|list %}<div class="flash err">Mindestens eine Mitteilungs-Regel steht auf „ohne Push" und nutzt dafür die neuere DIVERA-Schnittstelle. Dafür fehlt der persönliche Accesskey: „Kunde bearbeiten" öffnen und eintragen.</div>{% endif %}
 
 {% if checks %}
 <div class="card">

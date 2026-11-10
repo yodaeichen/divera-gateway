@@ -92,7 +92,7 @@
   </div>
   <label>Benachrichtigung bei Mitteilungen</label>
   <select name="push"><option value="1" {{ 'selected' if not rule or rule.push is none or rule.push }}>mit Push</option><option value="0" {{ 'selected' if rule and rule.push is not none and not rule.push }}>ohne Push (nur in der App sichtbar)</option></select>
-  <p class="hint">Gilt nur für die Art „Mitteilung". Ohne Push erscheint die Mitteilung in der App, aber ohne Ton und ohne Hinweis auf dem Sperrbildschirm; auch SMS, Anruf, E-Mail und Pager bleiben aus. Die Empfänger wählst du dann über angekreuzte Gruppen oder Personen, eine RIC wird dabei nicht übertragen.</p>
+  <p class="hint">Gilt nur für die Art „Mitteilung". Ohne Push erscheint die Mitteilung in der App, aber ohne Ton und ohne Hinweis auf dem Sperrbildschirm; auch SMS, Anruf, E-Mail und Pager bleiben aus. Die Empfänger wählst du dann über angekreuzte Gruppen oder Personen, eine RIC wird dabei nicht übertragen. Dieser Weg braucht beim Kunden einen persönlichen Accesskey; „mit Push" kommt ohne ihn aus.</p>
   {% for kind, field, title, hint in [('groups', 'grp', 'Gruppen', 'Alarmiert alle Mitglieder der angekreuzten Gruppen.'), ('persons', 'ucr', 'Einzelne Personen', 'Alarmiert genau die angekreuzten Personen. Für eine Meldung an nur eine Person: hier eine Person ankreuzen, RIC und Gruppen leer lassen.')] %}
   <label>{{ title }} <span class="count" data-count="{{ field }}"></span></label>
   {% if directory[kind] or stale[kind] %}

@@ -161,13 +161,13 @@ def wants_push(rule: m.Rule) -> bool:
 def plan(rule: m.Rule) -> dict:
     """Legt fest, über welche DIVERA-Schnittstelle eine Regel sendet und wen sie damit erreicht.
 
-    v1 (api/alarm) ist der bisherige Weg mit RIC. v2 (api/v2/news) wird für Mitteilungen genommen, wenn sie ohne Push
-    gehen sollen oder wenn Gruppen bzw. Personen angekreuzt sind und keine RIC eingetragen ist: nur dort lassen sich
-    Push und der Empfängerkreis ausdrücklich festlegen.
+    v1 (api/alarm) ist der Normalweg für Alarme und Mitteilungen; er arbeitet mit dem Alarm-Accesskey der Einheit und
+    kennt RIC, Gruppen und Personen. v2 (api/v2/news) wird nur für Mitteilungen ohne Push genommen, weil sich Push nur
+    dort abschalten lässt; dieser Weg braucht den persönlichen Accesskey eines Benutzers mit Schreibrecht.
     """
     persons, groups, ric = id_list(rule.ucr_ids), id_list(rule.group_ids), (rule.ric or "").strip()
     push = wants_push(rule) or rule.kind != "news"
-    if rule.kind != "news" or (push and (ric or not (persons or groups))):
+    if rule.kind != "news" or push:
         return {"route": "v1", "push": push, "ntype": None, "audience": "", "notes": []}
     notes = []
     if persons:

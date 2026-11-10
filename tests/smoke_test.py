@@ -214,12 +214,15 @@ with TestClient(app, base_url="http://testserver") as c:
                                        "send_pager": False, "user_cluster_relation": [501]},
                               "instructions": {"user_cluster_relation": {"mapping": "id"}}}, one["payload"]
     assert one["plan"]["audience"] == "nur die angekreuzten Personen" and one["has_recipient"] and not one["plan"]["notes"]
-    grp = c.post("/rules/preview", data=dict(NEWS, ric="", grp=["12", "13"])).json()   # Gruppen, mit Push, ohne RIC: v2
+    grp = c.post("/rules/preview", data=dict(NEWS, ric="", grp=["12", "13"], push="0")).json()   # Gruppen ohne Push: v2
     assert grp["payload"]["News"]["notification_type"] == 3 and grp["payload"]["News"]["group"] == [12, 13]
-    assert grp["payload"]["News"]["send_push"] is True and "send_sms" not in grp["payload"]["News"]
+    assert grp["payload"]["News"]["send_push"] is False
+    pv1 = c.post("/rules/preview", data=dict(NEWS, ric="", ucr=["501"], grp=["12"])).json()        # mit Push: immer alter Weg
+    assert pv1["plan"]["route"] == "v1" and pv1["payload"]["person"] == "501" and pv1["payload"]["user_cluster_relation_ids"] == ["501"]
+    assert pv1["payload"]["group_ids"] == ["12"] and pv1["payload"]["news"] == "1" and pv1["has_recipient"]
     alle = c.post("/rules/preview", data=dict(NEWS, push="0", extra_params="group_ids=1")).json()  # ohne Push, nur RIC
     assert alle["payload"]["News"]["notification_type"] == 2 and "group" not in alle["payload"]["News"] and len(alle["plan"]["notes"]) == 2
-    both = c.post("/rules/preview", data=dict(NEWS, ric="", ucr=["501"], grp=["12"])).json()
+    both = c.post("/rules/preview", data=dict(NEWS, ric="", ucr=["501"], grp=["12"], push="0")).json()
     assert both["payload"]["News"]["notification_type"] == 4 and "group" not in both["payload"]["News"] and both["plan"]["notes"]
     assert c.post("/rules/preview", data=dict(NEWS, kind="alarm", push="0", ucr=["501"])).json()["plan"]["route"] == "v1", "Alarm bleibt beim alten Weg"
     import httpx as _hx
@@ -268,7 +271,7 @@ with TestClient(app, base_url="http://testserver") as c:
     c.post("/rules/send-test", data=dict(NEWS, ric="", ucr=["501"], push="0", confirm="ja"))
     c.post("/rules/send-test", data=dict(NEWS, confirm="ja"))   # alter Weg mit RIC
     assert used == ["geheim123", "persoenlich456", "geheim123"], used
-    assert c.post("/rules/preview", data=dict(NEWS, ric="", ucr=["501"])).json()["user_key"] is True
+    assert c.post("/rules/preview", data=dict(NEWS, ric="", ucr=["501"], push="0")).json()["user_key"] is True
     rules.send_divera = real_send
     askn = c.post("/rules/send-test", data=dict(NEWS, ric="", ucr=["501"], push="0")).text
     assert "Mitteilung ohne Push gesendet" in askn and "nur die angekreuzten Personen" in askn and "Muster, Max" in askn
