@@ -20,7 +20,7 @@
     <td>
       {% if s.type == 'webhook' %}<code>{{ base_url }}hook/{{ s.webhook_token }}</code>
       {% elif s.last_error %}<span class="tag fehler">Fehler</span> <span class="hint">{{ s.last_error }}</span>
-      {% else %}Letzte Abfrage: {{ s.last_poll|localtime }}{% endif %}
+      {% else %}Letzte Abfrage: {{ s.last_poll|localtime }}{% if since.get(s.id) %}<br><span class="hint">verarbeitet Nachrichten, die ab {{ since[s.id]|localtime }} eingegangen sind</span>{% endif %}{% endif %}
     </td>
     <td style="white-space:nowrap">
       <form class="inline" method="post" action="/sources/{{ s.id }}/test"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">{{ 'Letzter Empfang' if s.type == 'webhook' else 'Verbindung testen' }}</button></form>

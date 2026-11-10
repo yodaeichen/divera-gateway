@@ -123,6 +123,16 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "B3 - Brand Gebäude" in sug and "Hauptstr. 12, 63679 Eichen" in sug and "karte.example" not in sug.split("<form")[0]
     with m.SessionLocal() as db:
         assert db.query(m.Rule).count() == 1, "Vorschlag darf nicht automatisch gespeichert werden"
+    # Einzelne Nachricht von Hand verarbeiten
+    assert "Jetzt verarbeiten" in shown and "Testmodus ist an" in shown
+    sources.FETCHERS["m365"] = lambda cfg, ref: {"id": "<mid-77>", "date": "", "from": "ls@x.de", "subject": "Alarm von Hand", "body": body}
+    done = c.post("/sources/1/process", data={"csrf": tok, "ref": "AAMk=1"}).text
+    assert "1 Regel hat gegriffen (Testmodus: nichts gesendet)" in done and "Alarm von Hand" in done
+    with m.SessionLocal() as db:
+        assert worker.already_processed(db, 1, "<mid-77>") is True, "von Hand verarbeitete Nachricht ist vorgemerkt"
+    sources.FETCHERS["m365"] = lambda cfg, ref: {"id": "<mid-78>", "date": "", "from": "x@y.de", "subject": "Newsletter", "body": "nix"}
+    assert "keine Regel passt" in c.post("/sources/1/process", data={"csrf": tok, "ref": "AAMk=2"}).text
+    assert c.post("/sources/2/process", data={"csrf": tok}).status_code == 400
     hooksug = c.post("/sources/2/suggest", data={"csrf": tok}).text
     assert "Übergebene Felder" in hooksug and "{geraet}" in hooksug
     logs = c.get("/logs").text
@@ -197,7 +207,8 @@ with TestClient(app, base_url="http://testserver") as c:
     r = c.post("/tenants/1/poll", data={"csrf": tok, "back": "home"})
     assert "1 Postfach abgerufen, 1 neue Nachricht." in r.text and calls == ["a@b.de"] and "Alarm manuell" in r.text
     assert "läuft gerade an" not in r.text and re.search(r"<td>\s*\d\d\.\d\d\.\d{4} \d\d:\d\d:\d\d\s*<br><span class=\"hint\">alle 30", r.text), "nächster Abruf als Uhrzeit"
-    assert "0 neue Nachrichten" in c.post("/tenants/1/poll", data={"csrf": tok}).text, "dieselbe Nachricht nicht doppelt"
+    again = c.post("/tenants/1/poll", data={"csrf": tok}).text
+    assert "0 neue Nachrichten" in again and "nach dem Anlegen oder letzten Speichern" in again, "dieselbe Nachricht nicht doppelt"
     sources.POLLERS["m365"] = lambda cfg, state: (_ for _ in ()).throw(RuntimeError("kaputt"))
     assert "Fehler bei: Leitstelle" in c.post("/tenants/1/poll", data={"csrf": tok, "back": "home"}).text
     assert c.post("/tenants/1/poll", data={}).status_code == 403

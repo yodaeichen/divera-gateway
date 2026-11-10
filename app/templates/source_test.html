@@ -28,11 +28,15 @@
   <tr><th>Empfangen</th><th>Absender</th><th>Betreff</th>{% if source.type == 'm365' %}<th>Textanfang</th>{% endif %}<th></th></tr>
   {% for i in result['items'] %}
   <tr><td style="white-space:nowrap">{{ i.ts|localtime if i.ts else '' }}</td><td>{{ i.from }}</td><td><strong>{{ i.subject }}</strong></td>{% if source.type == 'm365' %}<td class="detail">{{ i.preview }}</td>{% endif %}
-    <td><form method="post" action="/sources/{{ source.id }}/suggest"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="ref" value="{{ i.ref }}"><button class="light" style="white-space:nowrap">Regel vorschlagen</button></form></td></tr>
+    <td><form method="post" action="/sources/{{ source.id }}/suggest"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="ref" value="{{ i.ref }}"><button class="light" style="white-space:nowrap">Regel vorschlagen</button></form>
+        <form method="post" action="/sources/{{ source.id }}/process" style="margin-top:6px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="ref" value="{{ i.ref }}"><button class="light" style="white-space:nowrap">Jetzt verarbeiten</button></form></td></tr>
   {% else %}
   <tr><td colspan="5">Der Ordner ist leer.</td></tr>
   {% endfor %}
   </table>
+  {% if tenant.test_mode %}<div class="flash">Testmodus ist an: „Jetzt verarbeiten" wendet die Regeln an und schreibt ins Protokoll, sendet aber nichts an DIVERA.</div>
+  {% else %}<div class="flash err">Der Kunde ist scharf: „Jetzt verarbeiten" übergibt die Nachricht bei passender Regel wirklich an DIVERA.</div>{% endif %}
+  <p class="hint">Der automatische Abruf nimmt nur Nachrichten, die nach dem Anlegen oder letzten Speichern der Quelle eingegangen sind. Mit „Jetzt verarbeiten" schickst du eine der gezeigten Nachrichten von Hand durch die Regeln, auch wenn sie älter ist.</p>
   <p class="hint">Nur zur Kontrolle angezeigt, nichts davon wird gespeichert oder an DIVERA übergeben. „Regel vorschlagen" öffnet eine vorausgefüllte, noch ungespeicherte Regel mit dieser Nachricht als Beispiel.</p>
 </div>
 {% endif %}

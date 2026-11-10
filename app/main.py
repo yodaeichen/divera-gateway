@@ -190,7 +190,15 @@ def tenant_new(request: Request, user: m.User = Depends(current_user)):
 @app.get("/tenants/{tid}")
 def tenant_view(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     tenant = need(db.get(m.Tenant, tid))
-    return page(request, "tenant.html", user, tenant=tenant, base_url=str(request.base_url), directory=directory_of(tenant))
+    since = {}  # ab wann ein Microsoft-365-Postfach Nachrichten berücksichtigt
+    for source in tenant.sources:
+        stamp = json.loads(source.state or "{}").get("since") if source.type == "m365" else None
+        if stamp:
+            try:
+                since[source.id] = dt.datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(dt.timezone.utc).replace(tzinfo=None)
+            except ValueError:
+                pass
+    return page(request, "tenant.html", user, tenant=tenant, base_url=str(request.base_url), directory=directory_of(tenant), since=since)
 
 
 @app.get("/tenants/{tid}/edit")
@@ -243,12 +251,14 @@ async def tenant_poll(tid: int, request: Request, db: Session = Depends(get_db),
     else:
         results = await asyncio.gather(*(asyncio.to_thread(worker.run_source, s.id) for s in pollable))
         new = sum(r["new"] for r in results)
+        hint = "" if new else (" Automatisch verarbeitet werden nur Nachrichten, die nach dem Anlegen oder letzten Speichern der Quelle "
+                               "eingegangen sind. Ältere kannst du über „Verbindung testen“ einzeln verarbeiten.")
         failed = [s.name for s, r in zip(pollable, results) if r["error"]]
         text_ = f"{tenant.name}: {len(pollable)} {'Postfach' if len(pollable) == 1 else 'Postfächer'} abgerufen, " \
                 f"{new} neue {'Nachricht' if new == 1 else 'Nachrichten'}."
         if failed:
             text_ += " Fehler bei: " + ", ".join(failed) + "."
-        flash(request, text_, "err" if failed else "ok")
+        flash(request, text_ + ("" if failed else hint), "err" if failed else "ok")
     return go(back)
 
 
@@ -326,6 +336,38 @@ async def source_test(sid: int, request: Request, db: Session = Depends(get_db),
             error = f"{type(exc).__name__}: {str(exc)[:300]}"
     return page(request, "source_test.html", user, tenant=source.tenant, source=source, result=result, error=error,
                 base_url=str(request.base_url))
+
+
+def _process_one(source_id: int, msg: dict) -> int:
+    """Verarbeitet eine von Hand ausgewählte Nachricht wie eine neu eingegangene (ohne Altersgrenze)."""
+    with m.SessionLocal() as db:
+        source = db.get(m.Source, source_id)
+        worker.already_processed(db, source.id, msg["id"])  # vormerken, damit der automatische Abruf sie nicht noch einmal nimmt
+        return rules.process_message(db, source, msg)
+
+
+@app.post("/sources/{sid}/process")
+async def source_process(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    """Übergibt eine im Verbindungstest gezeigte Nachricht jetzt an die Regeln. Im scharfen Betrieb wird wirklich gesendet."""
+    form = await read_form(request)
+    source = need(db.get(m.Source, sid))
+    if source.type not in sources.FETCHERS:
+        raise HTTPException(400, "Für diese Quelle nicht möglich")
+    if not source.tenant.active:
+        flash(request, "Der Kunde ist inaktiv, es wird nichts verarbeitet.", "err")
+        return go(f"/tenants/{source.tenant_id}")
+    try:
+        msg = await asyncio.to_thread(sources.FETCHERS[source.type], source.config, text(form, "ref", 600))
+        matched = await asyncio.to_thread(_process_one, source.id, msg)
+    except Exception as exc:
+        flash(request, f"Nachricht konnte nicht verarbeitet werden ({type(exc).__name__}: {str(exc)[:200]})", "err")
+        return go(f"/tenants/{source.tenant_id}")
+    if matched:
+        mode = "Testmodus: nichts gesendet" if source.tenant.test_mode else "an DIVERA übergeben"
+        flash(request, f"„{msg['subject'][:80]}“ verarbeitet, {matched} {'Regel hat' if matched == 1 else 'Regeln haben'} gegriffen ({mode}). Details stehen unten.")
+    else:
+        flash(request, f"„{msg['subject'][:80]}“ verarbeitet, aber keine Regel passt. Öffne die Regel und prüfe sie mit dieser Nachricht in der Live-Ansicht.", "err")
+    return go(f"/logs?tenant={source.tenant_id}")
 
 
 @app.post("/sources/{sid}/token")

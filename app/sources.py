@@ -242,11 +242,12 @@ def fetch_m365(cfg: dict, ref: str) -> dict:
     """Holt eine einzelne Nachricht vollständig, als Vorlage für einen Regelvorschlag."""
     headers = {"Authorization": f"Bearer {_graph_token(cfg)}", "Prefer": 'outlook.body-content-type="text"'}
     resp = httpx.get(f"{GRAPH}/users/{cfg['mailbox']}/messages/{quote(ref, safe='')}",
-                     params={"$select": "subject,from,body"}, headers=headers, timeout=TIMEOUT)
+                     params={"$select": "internetMessageId,subject,from,body,receivedDateTime"}, headers=headers, timeout=TIMEOUT)
     if resp.status_code != 200:
         raise RuntimeError(f"Graph-Fehler {resp.status_code} beim Laden der Nachricht.")
     item = resp.json()
-    return {"from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
+    return {"id": item.get("internetMessageId") or ref, "date": item.get("receivedDateTime", ""),
+            "from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
             "subject": item.get("subject") or "", "body": ((item.get("body") or {}).get("content") or "").strip()}
 
 
@@ -258,8 +259,10 @@ def fetch_imap(cfg: dict, ref: str) -> dict:
         status, data = conn.uid("fetch", ref, "(BODY.PEEK[])")
         if status != "OK" or not data or not isinstance(data[0], tuple):
             raise RuntimeError("Nachricht nicht mehr vorhanden.")
-        sender, subject, body, _ = _parse_mail(data[0][1])
-        return {"from": sender, "subject": subject, "body": body}
+        sender, subject, body, ts = _parse_mail(data[0][1])
+        validity = (conn.response("UIDVALIDITY")[1] or [b"0"])[0]
+        validity = validity.decode() if isinstance(validity, bytes) else str(validity)
+        return {"id": f"{validity}:{ref}", "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "from": sender, "subject": subject, "body": body}
     finally:
         try:
             conn.logout()
