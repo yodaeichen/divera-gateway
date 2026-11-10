@@ -25,7 +25,11 @@ def csrf(html: str) -> str:
 with TestClient(app, base_url="http://testserver") as c:
     assert c.get("/", follow_redirects=False).status_code == 303, "ohne Anmeldung muss umgeleitet werden"
     tok = csrf(c.get("/login").text)
+    from app.version import VERSION
+    assert re.fullmatch(r"\d+\.\d+\.\d+", VERSION) and c.get("/healthz").json() == {"ok": True, "version": VERSION}
+    assert f"## {VERSION}" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "CHANGELOG.md"), encoding="utf-8").read(), "CHANGELOG nachziehen"
     first = c.get("/login").text
+    assert f"DIVERA Gateway {VERSION}" in first
     assert "powered by yodaeichen" in first and "https://github.com/sponsors/yodaeichen" in first and "<iframe" not in first
     assert "falsch" in c.post("/login", data={"csrf": tok, "username": "admin", "password": "nein"}).text
     tok = csrf(c.get("/login").text)

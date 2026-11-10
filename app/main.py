@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import db as m
 from . import access, rules, sources, suggest, worker
 from . import security as sec
+from .version import VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 for _name in ("httpx", "httpx2", "httpcore"):  # sonst landen Accesskeys aus URLs im Log
@@ -45,16 +46,18 @@ async def lifespan(_app):
             db.add(m.User(username=os.environ.get("ADMIN_USER", "admin"), password_hash=sec.hash_password(password)))
             db.commit()
             log.info("Erster Benutzer wurde angelegt.")
+    log.info("DIVERA Gateway %s gestartet.", VERSION)
     task = asyncio.create_task(worker.loop())
     yield
     task.cancel()
 
 
-app = FastAPI(title="DIVERA Gateway", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="DIVERA Gateway", version=VERSION, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(SessionMiddleware, secret_key=sec.SESSION_SECRET, session_cookie="gw_session", same_site="lax",
                    https_only=os.environ.get("COOKIE_SECURE", "true").lower() == "true", max_age=12 * 3600)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE, "templates"))
+templates.env.globals["version"] = VERSION
 templates.env.filters["localtime"] = lambda value: (
     value.replace(tzinfo=dt.timezone.utc).astimezone(TZ).strftime("%d.%m.%Y %H:%M:%S") if value else "nie")
 
@@ -873,4 +876,4 @@ async def webhook(token: str, request: Request, db: Session = Depends(get_db)):
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True}
+    return {"ok": True, "version": VERSION}
