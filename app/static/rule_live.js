@@ -69,6 +69,7 @@
       '<li>Gruppen: ' + (d.groups.length ? esc(d.groups.join(', ')) : '<em>keine</em>') + '</li>' +
       '<li>Personen: ' + (d.persons.length ? esc(d.persons.join(', ')) : '<em>keine</em>') + '</li></ul>';
 
+    if (d.kind !== 'news') h += '<div class="warn"><strong>Achtung, Alarm:</strong> Diese Regel löst bei den Empfängern einen echten Alarm mit Alarmton aus. Für reine Informationen „Mitteilung (leise)" wählen.</div>';
     if (!f.title.value) h += '<div class="warn">Das Stichwort ist leer.</div>';
     if (!d.has_recipient)
       h += '<div class="warn">Kein Empfänger angegeben. Trage eine RIC ein oder kreuze Gruppen oder Personen an.</div>';

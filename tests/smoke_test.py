@@ -47,6 +47,7 @@ with TestClient(app, base_url="http://testserver") as c:
         assert src.config["tenant_id"] == "dir-1" and src.config["client_secret"] == "s3cret" and src.tenant_id == 1
         assert "s3cret" not in src.config_enc and "geheim123" not in db.get(m.Tenant, 1).accesskey_enc
     assert "s3cret" not in c.get("/sources/1/edit").text
+    assert '<option value="news" selected>' in c.get("/tenants/1/rules/new").text, "Mitteilung ist die Vorgabe"
 
     r = c.post("/rules/save", data={"csrf": tok, "tenant_id": "1", "name": "Brand", "position": "10", "source_id": "",
                                     "match_subject": "alarm", "extract_regex": r"Stichwort:\s*(?P<stichwort>.+)\nOrt:\s*(?P<ort>.+)",
@@ -57,7 +58,7 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "ungültig" in c.post("/rules/save", data={"csrf": tok, "tenant_id": "1", "name": "kaputt", "extract_regex": "("}).text
 
     body = "Stichwort: B2 Wohnungsbrand\nOrt: Musterstraße 1, Musterstadt\n"
-    RULE = {"csrf": tok, "id": "1", "tenant_id": "1", "name": "Brand", "match_subject": "alarm", "require_regex": "on",
+    RULE = {"csrf": tok, "id": "1", "tenant_id": "1", "name": "Brand", "kind": "alarm", "match_subject": "alarm", "require_regex": "on",
             "extract_regex": "^Stichwort:\\s*(?P<stichwort>.+)$\r\n^Ort:\\s*(?P<ort>.+)$", "title_tpl": "{stichwort}",
             "text_tpl": "{subject} von {from} {geraet}", "address_tpl": "{ort}", "ric": "LZ1", "priority": "on",
             "extra_params": "group_ids=1,2\naccesskey=boese", "stop": "on", "active": "on", "t_from": "ls@x.de"}
@@ -116,7 +117,7 @@ with TestClient(app, base_url="http://testserver") as c:
             "Ort: 63679 Eichen\r\nBemerkung: Rauch aus Dachstuhl\r\nhttp://karte.example/1\r\n")
     sources.FETCHERS["m365"] = lambda cfg, ref: {"from": "leitstelle@kreis.example", "subject": "Alarmierung FF Eichen 10.11.2026 16:02", "body": mail}
     sug = c.post("/sources/1/suggest", data={"csrf": tok, "ref": "AAMk=1"}).text
-    assert "Vorschlag aus der Beispielnachricht" in sug and "Die Regel greift" in sug
+    assert "Vorschlag aus der Beispielnachricht" in sug and "Die Regel greift" in sug and '<option value="news" selected>' in sug
     assert 'value="Alarmierung FF Eichen"' in sug and 'value="leitstelle@kreis.example"' in sug
     assert 'value="{einsatzstichwort}"' in sug and 'value="{strasse_nr}, {ort}"' in sug and "{bemerkung}" in sug
     assert "B3 - Brand Gebäude" in sug and "Hauptstr. 12, 63679 Eichen" in sug and "karte.example" not in sug.split("<form")[0]
@@ -141,6 +142,11 @@ with TestClient(app, base_url="http://testserver") as c:
         old = {"id": "o", "from": "a", "subject": "Alarm", "body": body, "ts": dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=2)}
         assert worker.handle_message(db, webhook_src, old) == 0
     assert "veraltet" in c.get("/logs?status=veraltet").text
+
+    nokind = c.post("/rules/preview", data={k: v for k, v in dict(RULE, t_subject="Alarm", t_body=body).items() if k != "kind"}).json()  # ohne Angabe der Art
+    assert nokind["kind"] == "news" and nokind["payload"]["news"] == "1"
+    askind = c.post("/rules/preview", data=dict(RULE, kind="alarm", t_subject="Alarm", t_body=body)).json()
+    assert askind["kind"] == "alarm" and "news" not in askind["payload"]
 
     # Empfänger aus DIVERA: Personen und Gruppen ankreuzen
     sample_pull = {"success": True, "data": {"cluster": {

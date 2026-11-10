@@ -371,7 +371,7 @@ def apply_rule_form(rule: m.Rule, form, db: Session) -> str:
     rule.name = text(form, "name", 120) or "Regel"
     rule.active, rule.priority = "active" in form, "priority" in form
     rule.require_regex, rule.stop = "require_regex" in form, "stop" in form
-    rule.kind = "news" if form.get("kind") == "news" else "alarm"
+    rule.kind = "alarm" if form.get("kind") == "alarm" else "news"  # Alarm nur bei ausdrücklicher Auswahl
     try:
         rule.position = int(form.get("position") or 10)
     except ValueError:
@@ -504,7 +504,7 @@ async def rule_suggest(sid: int, request: Request, db: Session = Depends(get_db)
             return go(f"/tenants/{source.tenant_id}")
     proposal = suggest.suggest(msg)
     rule = m.Rule(tenant_id=source.tenant_id, source_id=source.id, active=True, position=10, match_body="",
-                  require_regex=False, kind="alarm", ric="", ucr_ids="", group_ids="", priority=False, extra_params="", stop=True,
+                  require_regex=False, kind="news", ric="", ucr_ids="", group_ids="", priority=False, extra_params="", stop=True,
                   **proposal["fields"])
     sample = dict(msg, body=msg["body"][:20000], date=m.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
     return rule_page(request, user, source.tenant, rule, sample=sample, result=evaluate(rule, sample), notes=proposal["notes"])

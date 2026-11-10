@@ -93,7 +93,7 @@ class Rule(Base):
     match_body: Mapped[str] = mapped_column(String(200), default="")
     extract_regex: Mapped[str] = mapped_column(Text, default="")
     require_regex: Mapped[bool] = mapped_column(Boolean, default=False)
-    kind: Mapped[str] = mapped_column(String(10), default="alarm")  # alarm | news
+    kind: Mapped[str] = mapped_column(String(10), default="news")  # news (Mitteilung, Vorgabe) | alarm
     title_tpl: Mapped[str] = mapped_column(Text, default="{subject}")
     text_tpl: Mapped[str] = mapped_column(Text, default="{body}")
     address_tpl: Mapped[str] = mapped_column(Text, default="")

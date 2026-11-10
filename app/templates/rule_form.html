@@ -82,8 +82,8 @@
 
   <h2 class="step">3. Ziel: was geht an DIVERA?</h2>
   <div class="grid">
-    <div><label>Art</label><select name="kind"><option value="alarm" {{ 'selected' if not rule or rule.kind == 'alarm' }}>Alarm</option><option value="news" {{ 'selected' if rule and rule.kind == 'news' }}>Mitteilung (leise)</option></select>
-      <p class="hint">Alarm: Einsatz mit Alarmton und Rückmeldung. Mitteilung: reine Information ohne Alarmierung.</p></div>
+    <div><label>Art</label><select name="kind"><option value="news" {{ 'selected' if not rule or rule.kind != 'alarm' }}>Mitteilung (leise)</option><option value="alarm" {{ 'selected' if rule and rule.kind == 'alarm' }}>Alarm</option></select>
+      <p class="hint">Mitteilung (Vorgabe): reine Information ohne Alarmierung. Alarm: Einsatz mit Alarmton und Rückmeldung, nur bewusst auswählen.</p></div>
     <div><label>Empfänger (RIC)</label><input type="text" name="ric" value="{{ rule.ric if rule else '' }}" placeholder="LZ1,LZ2">
       <p class="hint">Alarmierungs-RIC der Gruppen, genau wie in DIVERA hinterlegt. Mehrere mit Komma trennen.</p></div>
   </div>
@@ -135,5 +135,5 @@
 </form>
 <aside id="live" class="card live"><h2>Live-Ansicht</h2><p class="hint">Wird geladen. Ohne JavaScript bitte „Prüfen ohne Speichern" verwenden.</p></aside>
 </div>
-<script src="/static/rule_live.js?v=6" defer></script>
+<script src="/static/rule_live.js?v=8" defer></script>
 {% endblock %}
