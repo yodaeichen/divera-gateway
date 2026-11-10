@@ -181,7 +181,7 @@ def tenant_new(request: Request, user: m.User = Depends(current_user)):
 @app.get("/tenants/{tid}")
 def tenant_view(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     tenant = need(db.get(m.Tenant, tid))
-    return page(request, "tenant.html", user, tenant=tenant, base_url=str(request.base_url))
+    return page(request, "tenant.html", user, tenant=tenant, base_url=str(request.base_url), directory=directory_of(tenant))
 
 
 @app.get("/tenants/{tid}/edit")
@@ -202,6 +202,22 @@ async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.U
     db.commit()
     flash(request, "Kunde gespeichert.")
     return go(f"/tenants/{tenant.id}")
+
+
+@app.post("/tenants/{tid}/directory")
+async def tenant_directory(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    """Lädt Personen und Gruppen der Einheit aus DIVERA für die Empfängerauswahl in Regeln."""
+    await read_form(request)
+    tenant = need(db.get(m.Tenant, tid))
+    try:
+        directory = await asyncio.to_thread(rules.fetch_directory, sec.decrypt(tenant.accesskey_enc))
+    except Exception as exc:
+        flash(request, f"Empfänger konnten nicht geladen werden: {str(exc)[:300]}", "err")
+        return go(f"/tenants/{tid}")
+    tenant.directory, tenant.directory_ts = json.dumps(directory, ensure_ascii=False), m.utcnow()
+    db.commit()
+    flash(request, f"{len(directory['persons'])} Personen und {len(directory['groups'])} Gruppen aus DIVERA geladen.")
+    return go(f"/tenants/{tid}")
 
 
 @app.post("/tenants/{tid}/poll")
@@ -327,8 +343,18 @@ async def source_delete(sid: int, request: Request, db: Session = Depends(get_db
 
 # ---------- Regeln ----------
 
+def directory_of(tenant: m.Tenant) -> dict:
+    data = json.loads(tenant.directory or "{}")
+    return {"persons": data.get("persons") or [], "groups": data.get("groups") or []}
+
+
 def rule_page(request, user, tenant, rule, **extra):
-    return page(request, "rule_form.html", user, tenant=tenant, rule=rule, **extra)
+    directory = directory_of(tenant)
+    chosen = {"persons": [int(i) for i in rules.id_list(rule.ucr_ids)] if rule else [],
+              "groups": [int(i) for i in rules.id_list(rule.group_ids)] if rule else []}
+    known = {kind: {entry["id"] for entry in directory[kind]} for kind in directory}
+    stale = {kind: [i for i in chosen[kind] if i not in known[kind]] for kind in chosen}  # gewählt, aber nicht mehr in der Liste
+    return page(request, "rule_form.html", user, tenant=tenant, rule=rule, directory=directory, chosen=chosen, stale=stale, **extra)
 
 
 def apply_rule_form(rule: m.Rule, form, db: Session) -> str:
@@ -348,6 +374,8 @@ def apply_rule_form(rule: m.Rule, form, db: Session) -> str:
     for key in ("match_from", "match_subject", "match_body"):
         setattr(rule, key, text(form, key, 500))
     rule.ric = text(form, "ric", 300)
+    rule.ucr_ids = ",".join(rules.id_list(form.getlist("ucr")))[:1000]
+    rule.group_ids = ",".join(rules.id_list(form.getlist("grp")))[:1000]
     for key in ("extract_regex", "title_tpl", "text_tpl", "address_tpl", "extra_params"):
         setattr(rule, key, str(form.get(key, "")).replace("\r\n", "\n").strip()[:4000])
     for number, line in enumerate(rule.extract_regex.splitlines(), 1):
@@ -421,7 +449,11 @@ async def rule_preview(request: Request, db: Session = Depends(get_db), user: m.
     if not sample:
         return JSONResponse({"state": "nosample"})
     data = rules.preview(rule, sample)
-    data.update(state="ok", form_error=error)
+    directory = directory_of(need(db.get(m.Tenant, rule.tenant_id)))
+    def names(kind: str, ids: str) -> list[str]:
+        lookup = {str(entry["id"]): entry["name"] for entry in directory[kind]}
+        return [lookup.get(i, f"ID {i}") for i in rules.id_list(ids)]
+    data.update(state="ok", form_error=error, persons=names("persons", rule.ucr_ids), groups=names("groups", rule.group_ids))
     return JSONResponse(data)
 
 
@@ -463,7 +495,7 @@ async def rule_suggest(sid: int, request: Request, db: Session = Depends(get_db)
             return go(f"/tenants/{source.tenant_id}")
     proposal = suggest.suggest(msg)
     rule = m.Rule(tenant_id=source.tenant_id, source_id=source.id, active=True, position=10, match_body="",
-                  require_regex=False, kind="alarm", ric="", priority=False, extra_params="", stop=True,
+                  require_regex=False, kind="alarm", ric="", ucr_ids="", group_ids="", priority=False, extra_params="", stop=True,
                   **proposal["fields"])
     sample = dict(msg, body=msg["body"][:20000], date=m.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
     return rule_page(request, user, source.tenant, rule, sample=sample, result=evaluate(rule, sample), notes=proposal["notes"])

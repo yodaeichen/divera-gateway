@@ -13,6 +13,8 @@ from . import security as sec
 
 log = logging.getLogger("gateway.rules")
 DIVERA_API_URL = os.environ.get("DIVERA_API_URL", "https://app.divera247.com/api/alarm")
+DIVERA_PULL_URL = os.environ.get("DIVERA_PULL_URL", "https://app.divera247.com/api/v2/pull/all")
+RECIPIENT_KEYS = ("ric", "group_ids", "user_cluster_relation_ids", "ucr", "cluster_ids", "vehicle", "vehicle_ids", "person", "alarmcode_id")
 LIMITS = {"title": 50, "text": 1000, "address": 200}
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
@@ -79,13 +81,74 @@ def preview(rule: m.Rule, msg: dict) -> dict:
     used = _PLACEHOLDER.findall(" ".join([rule.title_tpl or "", rule.text_tpl or "", rule.address_tpl or "", rule.ric or "",
                                           rule.extra_params or ""]))
     result.update(
-        fields=fields, payload=build_payload(rule, values), kind=rule.kind, priority=bool(rule.priority),
+        fields=fields, payload=(payload := build_payload(rule, values)), kind=rule.kind,
+        has_recipient=any(payload.get(key) for key in RECIPIENT_KEYS), priority=bool(rule.priority),
         active=bool(rule.active), require_regex=bool(rule.require_regex),
         unknown=sorted({name for name in used if name not in values}),
         empty=sorted({name for name in used if name in values and not values[name]}),
         placeholders={k: v[:80] for k, v in values.items() if k != "body"},
     )
     return result
+
+
+def id_list(value) -> list[str]:
+    """Bereinigt eine Liste von DIVERA-IDs: nur Zahlen, ohne Doppelte, Reihenfolge bleibt."""
+    parts = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
+    seen: list[str] = []
+    for part in parts:
+        part = str(part).strip()
+        if part.isdigit() and part not in seen:
+            seen.append(part)
+    return seen
+
+
+def _entries(node) -> list[dict]:
+    """Liest {id: {...}} oder [{id: ...}] aus der DIVERA-Antwort und liefert sortierte {id, name}-Einträge."""
+    if isinstance(node, dict):
+        items = list(node.items())
+    elif isinstance(node, list):
+        items = [(entry.get("id"), entry) for entry in node if isinstance(entry, dict)]
+    else:
+        items = []
+    result = []
+    for key, entry in items:
+        if not isinstance(entry, dict):
+            continue
+        ident = str(entry.get("id", key))
+        name = (entry.get("stdformat_name") or " ".join(str(x) for x in (entry.get("firstname"), entry.get("lastname")) if x)
+                or entry.get("name") or entry.get("title") or f"ID {ident}")
+        if ident.isdigit():
+            result.append({"id": int(ident), "name": str(name).strip()[:120]})
+    return sorted(result, key=lambda e: e["name"].lower())
+
+
+def parse_directory(data) -> dict:
+    cluster = ((data or {}).get("data") or {}).get("cluster") if isinstance(data, dict) else None
+    if not isinstance(cluster, dict):
+        keys = ", ".join(list(data)[:8]) if isinstance(data, dict) else type(data).__name__
+        raise RuntimeError(f"Unerwartete Antwort von DIVERA (enthält: {keys}).")
+    directory = {"persons": _entries(cluster.get("consumer")), "groups": _entries(cluster.get("group"))}
+    if not directory["persons"] and not directory["groups"]:
+        raise RuntimeError("DIVERA hat weder Personen noch Gruppen geliefert. Darf dieser Accesskey die Stammdaten lesen?")
+    return directory
+
+
+def fetch_directory(accesskey: str) -> dict:
+    """Lädt Personen und Gruppen der Einheit aus DIVERA, damit man sie in Regeln auswählen kann."""
+    if not accesskey:
+        raise RuntimeError("Kein DIVERA-Accesskey hinterlegt.")
+    try:
+        resp = httpx.get(DIVERA_PULL_URL, params={"accesskey": accesskey}, timeout=20)
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Netzwerkfehler: {type(exc).__name__}") from None
+    if resp.status_code in (401, 403):
+        raise RuntimeError(f"DIVERA lehnt den Accesskey für diese Abfrage ab (HTTP {resp.status_code}).")
+    if resp.status_code != 200:
+        raise RuntimeError(f"DIVERA antwortet mit HTTP {resp.status_code}.")
+    try:
+        return parse_directory(resp.json())
+    except ValueError:
+        raise RuntimeError("DIVERA hat keine lesbare Antwort geliefert.") from None
 
 
 def build_payload(rule: m.Rule, values: dict) -> dict:
@@ -98,6 +161,10 @@ def build_payload(rule: m.Rule, values: dict) -> dict:
         payload["address"] = address
     if rule.ric.strip():
         payload["ric"] = render(rule.ric, values)
+    if id_list(rule.ucr_ids):
+        payload["user_cluster_relation_ids"] = ",".join(id_list(rule.ucr_ids))
+    if id_list(rule.group_ids):
+        payload["group_ids"] = ",".join(id_list(rule.group_ids))
     if rule.priority:
         payload["priority"] = "1"
     if rule.kind == "news":

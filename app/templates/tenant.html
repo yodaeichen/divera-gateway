@@ -33,6 +33,15 @@
 </div>
 
 <div class="card">
+  <div class="row"><h2>Empfänger aus DIVERA</h2>
+    <form method="post" action="/tenants/{{ tenant.id }}/directory"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Empfänger aus DIVERA laden</button></form></div>
+  {% if tenant.directory_ts %}
+  <p>{{ directory.persons|length }} Personen und {{ directory.groups|length }} Gruppen, zuletzt geladen am {{ tenant.directory_ts|localtime }}.</p>
+  {% else %}<p>Noch nicht geladen.</p>{% endif %}
+  <p class="hint">Holt Namen und IDs der Personen und Gruppen der Einheit, damit du sie in Regeln ankreuzen kannst. Nach Änderungen in DIVERA einfach neu laden.</p>
+</div>
+
+<div class="card">
   <div class="row"><h2>Regeln</h2><a class="btn" href="/tenants/{{ tenant.id }}/rules/new">Regel anlegen</a></div>
   <table>
   <tr><th>Rang</th><th>Name</th><th>Quelle</th><th>Bedingungen</th><th>Ziel</th><th></th></tr>
@@ -42,7 +51,7 @@
     <td><a href="/rules/{{ r.id }}/edit"><strong>{{ r.name }}</strong></a>{% if not r.active %} <span class="tag">inaktiv</span>{% endif %}</td>
     <td>{{ r.source.name if r.source else 'alle' }}</td>
     <td class="detail">{% if r.match_from %}Absender: {{ r.match_from|replace(';', ' oder ') }}<br>{% endif %}{% if r.match_subject %}Betreff: {{ r.match_subject|replace(';', ' oder ') }}<br>{% endif %}{% if r.match_body %}Text: {{ r.match_body|replace(';', ' oder ') }}<br>{% endif %}{% if r.extract_regex %}mit Ausdrücken{% endif %}</td>
-    <td>{{ 'Mitteilung' if r.kind == 'news' else 'Alarm' }}{% if r.ric %}<br><span class="hint">{{ r.ric }}</span>{% endif %}</td>
+    <td>{{ 'Mitteilung' if r.kind == 'news' else 'Alarm' }}{% if r.ric %}<br><span class="hint">RIC {{ r.ric }}</span>{% endif %}{% if r.group_ids %}<br><span class="hint">{{ r.group_ids.split(',')|length }} Gruppe(n)</span>{% endif %}{% if r.ucr_ids %}<br><span class="hint">{{ r.ucr_ids.split(',')|length }} Person(en)</span>{% endif %}</td>
     <td><form class="inline" method="post" action="/rules/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form></td>
   </tr>
   {% else %}<tr><td colspan="6">Noch keine Regel. Ohne Regel wird nichts an DIVERA übergeben.</td></tr>{% endfor %}

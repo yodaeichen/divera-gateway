@@ -65,11 +65,13 @@
       '<div class="x">' + (esc(f.text.value) || '<em>kein Text</em>') + '</div></div>';
     h += '<ul><li>Stichwort: ' + count(f.title) + '</li><li>Text: ' + count(f.text) + '</li>' +
       (f.address.length ? '<li>Adresse: ' + count(f.address) + '</li>' : '') +
-      '<li>Empfänger (RIC): ' + (d.payload.ric ? esc(d.payload.ric) : '<em>keiner eingetragen</em>') + '</li></ul>';
+      '<li>Empfänger (RIC): ' + (d.payload.ric ? esc(d.payload.ric) : '<em>keine</em>') + '</li>' +
+      '<li>Gruppen: ' + (d.groups.length ? esc(d.groups.join(', ')) : '<em>keine</em>') + '</li>' +
+      '<li>Personen: ' + (d.persons.length ? esc(d.persons.join(', ')) : '<em>keine</em>') + '</li></ul>';
 
     if (!f.title.value) h += '<div class="warn">Das Stichwort ist leer.</div>';
-    if (!d.payload.ric && !/(^|\n)\s*(group_ids|cluster_ids|vehicle|vehicle_ids|person|user_cluster_relation_ids|ucr|alarmcode_id)\s*=/.test(form.elements.extra_params.value))
-      h += '<div class="warn">Kein Empfänger angegeben. Trage eine RIC ein oder setze z. B. <code>group_ids</code> bei den weiteren Parametern.</div>';
+    if (!d.has_recipient)
+      h += '<div class="warn">Kein Empfänger angegeben. Trage eine RIC ein oder kreuze Gruppen oder Personen an.</div>';
     if (d.unknown.length) h += '<div class="warn">Unbekannte Platzhalter (bleiben leer): ' + d.unknown.map(ph).join(', ') + '</div>';
     if (d.empty.length) h += '<div class="warn">Platzhalter ohne Inhalt bei dieser Nachricht: ' + d.empty.map(ph).join(', ') + '</div>';
 
@@ -95,6 +97,25 @@
       });
   }
   function schedule() { clearTimeout(timer); timer = setTimeout(update, 250); }
+  // Auswahllisten: Zähler und Filter
+  function counts() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-count]'), function (el) {
+      var n = form.querySelectorAll('input[name="' + el.getAttribute('data-count') + '"]:checked').length;
+      el.textContent = n ? '(' + n + ' ausgewählt)' : '';
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('[data-filter]'), function (box) {
+    box.addEventListener('input', function (ev) {
+      ev.stopPropagation();
+      var needle = box.value.toLowerCase();
+      var rows = document.querySelectorAll('[data-list="' + box.getAttribute('data-filter') + '"] label');
+      Array.prototype.forEach.call(rows, function (row) {
+        row.style.display = row.textContent.toLowerCase().indexOf(needle) >= 0 || row.querySelector('input').checked ? '' : 'none';
+      });
+    });
+  });
+  form.addEventListener('change', counts);
+  counts();
   form.addEventListener('input', schedule);
   form.addEventListener('change', schedule);
   update();

@@ -142,6 +142,41 @@ with TestClient(app, base_url="http://testserver") as c:
         assert worker.handle_message(db, webhook_src, old) == 0
     assert "veraltet" in c.get("/logs?status=veraltet").text
 
+    # Empfänger aus DIVERA: Personen und Gruppen ankreuzen
+    sample_pull = {"success": True, "data": {"cluster": {
+        "consumer": {"501": {"firstname": "Max", "lastname": "Muster", "stdformat_name": "Muster, Max"}, "502": {"firstname": "Erika", "lastname": "Beispiel"}, "x": "kaputt"},
+        "group": [{"id": 12, "name": "Löschzug 1"}, {"id": 13, "title": "Führung"}]}}}
+    parsed = rules.parse_directory(sample_pull)
+    assert parsed == {"persons": [{"id": 502, "name": "Erika Beispiel"}, {"id": 501, "name": "Muster, Max"}],
+                      "groups": [{"id": 13, "name": "Führung"}, {"id": 12, "name": "Löschzug 1"}]}, parsed
+    for bad in ({"success": False}, {"data": {"cluster": {}}}, []):
+        try:
+            rules.parse_directory(bad); raise SystemExit("kein Fehler bei " + str(bad))
+        except RuntimeError:
+            pass
+    assert rules.id_list("5, 7,x,5,;DROP") == ["5", "7"] and rules.id_list(["3", "3", "a"]) == ["3"]
+    assert "Noch keine Liste vorhanden" in c.get("/rules/1/edit").text
+    seen_keys = []
+    rules.fetch_directory = lambda key: seen_keys.append(key) or parsed
+    r = c.post("/tenants/1/directory", data={"csrf": tok})
+    assert "2 Personen und 2 Gruppen aus DIVERA geladen" in r.text and seen_keys == ["geheim123"]
+    edit = c.get("/rules/1/edit").text
+    assert 'name="ucr" value="501"' in edit and "Muster, Max" in edit and 'name="grp" value="12"' in edit
+    PICK = dict(RULE, ric="", extra_params="", ucr=["501", "999", "boese"], grp=["12"], t_subject="Alarm", t_body=body)
+    live3 = c.post("/rules/preview", data=PICK).json()
+    assert live3["payload"]["user_cluster_relation_ids"] == "501,999" and live3["payload"]["group_ids"] == "12" and "ric" not in live3["payload"]
+    assert live3["persons"] == ["Muster, Max", "ID 999"] and live3["groups"] == ["Löschzug 1"] and live3["has_recipient"]
+    assert not c.post("/rules/preview", data=dict(RULE, ric="", extra_params="", t_subject="Alarm", t_body=body)).json()["has_recipient"]
+    saved = c.post("/rules/save", data=PICK).text
+    assert 'value="501" checked' in saved and "nicht mehr in der DIVERA-Liste" in saved and 'value="502" checked' not in saved
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, 1).ucr_ids == "501,999" and db.get(m.Rule, 1).group_ids == "12"
+    c.post("/rules/save", data=dict(RULE, t_subject="", t_from=""))  # Auswahl wieder leeren, RIC zurück
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, 1).ucr_ids == "" and db.get(m.Rule, 1).ric == "LZ1"
+    rules.fetch_directory = lambda key: (_ for _ in ()).throw(RuntimeError("DIVERA lehnt den Accesskey für diese Abfrage ab (HTTP 403)."))
+    assert "konnten nicht geladen werden" in c.post("/tenants/1/directory", data={"csrf": tok}).text
+
     # Manueller Abruf je Kunde
     calls = []
     def fake_poll(cfg, state):

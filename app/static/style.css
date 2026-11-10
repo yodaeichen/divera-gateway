@@ -53,3 +53,5 @@ h2.step { margin-top:26px; padding-top:16px; border-top:1px solid var(--line); }
 .legend summary { cursor:pointer; font-weight:600; } .legend table { margin-top:12px; } .legend td { font-size:14px; }
 .card .hint + label, .card .hint + .grid { margin-top:14px; }
 button:disabled { opacity:.5; cursor:not-allowed; }
+.picklist { border:1px solid #c4cad4; border-radius:6px; padding:6px 10px; max-height:190px; overflow:auto; background:#fff; }
+.picklist label.check { margin:3px 0; } .pickfilter { margin-bottom:6px; }

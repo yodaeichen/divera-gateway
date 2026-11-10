@@ -47,6 +47,9 @@ class Tenant(Base):
     accesskey_enc: Mapped[str] = mapped_column(Text, default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     test_mode: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Aus DIVERA geladene Personen und Gruppen: {"persons": [{"id", "name"}], "groups": [...]}
+    directory: Mapped[str] = mapped_column(Text, default="{}", server_default="{}")
+    directory_ts: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     sources: Mapped[list["Source"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
     rules: Mapped[list["Rule"]] = relationship(back_populates="tenant", cascade="all, delete-orphan",
                                                order_by="Rule.position, Rule.id")
@@ -95,6 +98,8 @@ class Rule(Base):
     text_tpl: Mapped[str] = mapped_column(Text, default="{body}")
     address_tpl: Mapped[str] = mapped_column(Text, default="")
     ric: Mapped[str] = mapped_column(String(300), default="")
+    ucr_ids: Mapped[str] = mapped_column(String(1000), default="", server_default="")    # einzelne Personen (DIVERA-IDs)
+    group_ids: Mapped[str] = mapped_column(String(1000), default="", server_default="")  # Gruppen (DIVERA-IDs)
     priority: Mapped[bool] = mapped_column(Boolean, default=False)
     extra_params: Mapped[str] = mapped_column(Text, default="")
     stop: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -126,5 +131,22 @@ class Processed(Base):
     ts: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+# Spalten, die nach der ersten Version dazugekommen sind. Bestehende Datenbanken werden beim Start ergänzt.
+ADDED_COLUMNS = {
+    "tenants": {"directory": "TEXT DEFAULT '{}'", "directory_ts": "DATETIME"},
+    "rules": {"ucr_ids": "VARCHAR(1000) DEFAULT ''", "group_ids": "VARCHAR(1000) DEFAULT ''"},
+}
+
+
+def add_missing_columns():
+    with engine.begin() as conn:
+        for table, columns in ADDED_COLUMNS.items():
+            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            for name, ddl in columns.items():
+                if name not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+
 def init_db():
     Base.metadata.create_all(engine)
+    add_missing_columns()

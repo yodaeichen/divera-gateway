@@ -87,6 +87,20 @@
     <div><label>Empfänger (RIC)</label><input type="text" name="ric" value="{{ rule.ric if rule else '' }}" placeholder="LZ1,LZ2">
       <p class="hint">Alarmierungs-RIC der Gruppen, genau wie in DIVERA hinterlegt. Mehrere mit Komma trennen.</p></div>
   </div>
+  {% for kind, field, title, hint in [('groups', 'grp', 'Gruppen', 'Alarmiert alle Mitglieder der angekreuzten Gruppen.'), ('persons', 'ucr', 'Einzelne Personen', 'Alarmiert genau die angekreuzten Personen. Für eine Meldung an nur eine Person: hier eine Person ankreuzen, RIC und Gruppen leer lassen.')] %}
+  <label>{{ title }} <span class="count" data-count="{{ field }}"></span></label>
+  {% if directory[kind] or stale[kind] %}
+  {% if directory[kind]|length > 8 %}<input type="text" class="pickfilter" data-filter="{{ field }}" placeholder="Liste filtern …" autocomplete="off">{% endif %}
+  <div class="picklist" data-list="{{ field }}">
+    {% for e in directory[kind] %}<label class="check"><input type="checkbox" name="{{ field }}" value="{{ e.id }}" {{ 'checked' if e.id in chosen[kind] }}> {{ e.name }}</label>{% endfor %}
+    {% for i in stale[kind] %}<label class="check"><input type="checkbox" name="{{ field }}" value="{{ i }}" checked> ID {{ i }} <span class="hint">(nicht mehr in der DIVERA-Liste)</span></label>{% endfor %}
+  </div>
+  <p class="hint">{{ hint }}</p>
+  {% else %}
+  <p class="hint">Noch keine Liste vorhanden. Beim Kunden auf „Empfänger aus DIVERA laden" klicken, dann erscheinen hier die {{ title }} zum Ankreuzen.</p>
+  {% endif %}
+  {% endfor %}
+  <p class="hint">RIC, Gruppen und Personen werden gemeinsam an DIVERA übergeben. Die Live-Ansicht zeigt, was mitgeschickt wird.</p>
   <label>Stichwort</label><input type="text" name="title_tpl" value="{{ rule.title_tpl if rule else '{subject}' }}" placeholder="{stichwort}">
   <p class="hint">Überschrift des Alarms, höchstens 50 Zeichen. Fester Text und Platzhalter lassen sich mischen, z. B. <code>BMA {objekt}</code>.</p>
   <label>Text</label><textarea name="text_tpl" placeholder="{body}">{{ rule.text_tpl if rule else '{body}' }}</textarea>
@@ -121,5 +135,5 @@
 </form>
 <aside id="live" class="card live"><h2>Live-Ansicht</h2><p class="hint">Wird geladen. Ohne JavaScript bitte „Prüfen ohne Speichern" verwenden.</p></aside>
 </div>
-<script src="/static/rule_live.js?v=4" defer></script>
+<script src="/static/rule_live.js?v=6" defer></script>
 {% endblock %}
