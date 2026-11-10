@@ -44,11 +44,48 @@ def _graph_token(cfg: dict) -> str:
     return resp.json()["access_token"]
 
 
+WELL_KNOWN = {"inbox", "archive", "drafts", "sentitems", "deleteditems", "junkemail", "outbox", "msgfolderroot"}
+ALIASES = {"posteingang": "inbox", "archiv": "archive", "junk-e-mail": "junkemail", "gelöschte elemente": "deleteditems"}
+
+
+def _find_folder(cfg: dict, headers: dict, parent: str | None, name: str) -> str:
+    """Sucht einen Ordner per Anzeigename, entweder auf oberster Ebene oder unter einem Elternordner."""
+    base = f"{GRAPH}/users/{cfg['mailbox']}/mailFolders"
+    url = f"{base}/{parent}/childFolders" if parent else base
+    escaped = name.replace("'", "''")
+    resp = httpx.get(url, params={"$filter": f"displayName eq '{escaped}'", "$select": "id"}, headers=headers, timeout=TIMEOUT)
+    if resp.status_code != 200:
+        try:
+            reason = resp.json()["error"]["message"]
+        except Exception:
+            reason = resp.text
+        raise RuntimeError(f"Graph-Fehler {resp.status_code}: {reason[:300]}")
+    found = resp.json().get("value", [])
+    if not found:
+        raise RuntimeError(f"Ordner '{name}' nicht gefunden. Schreibweise wie in Outlook, Unterordner mit / trennen.")
+    return found[0]["id"]
+
+
+def _resolve_folder(cfg: dict, headers: dict) -> str:
+    """Erlaubt Pfade wie 'Posteingang/Alarme/Leitstelle', Standardnamen wie 'inbox' oder eine Ordner-ID."""
+    parts = [p.strip() for p in (cfg.get("folder") or "inbox").replace("\\", "/").split("/") if p.strip()] or ["inbox"]
+    first = ALIASES.get(parts[0].lower(), parts[0])
+    if first.lower() in WELL_KNOWN:
+        folder = first.lower()
+    elif len(parts) == 1 and len(first) > 60 and " " not in first:
+        return first  # sieht nach einer Ordner-ID aus
+    else:
+        folder = _find_folder(cfg, headers, None, first)
+    for name in parts[1:]:
+        folder = _find_folder(cfg, headers, folder, name)
+    return folder
+
+
 def _graph_messages(cfg: dict, params: dict) -> list[dict]:
     token = _graph_token(cfg)
-    folder = cfg.get("folder") or "inbox"
-    url = f"{GRAPH}/users/{cfg['mailbox']}/mailFolders/{folder}/messages"
     headers = {"Authorization": f"Bearer {token}", "Prefer": 'outlook.body-content-type="text"'}
+    folder = _resolve_folder(cfg, headers)
+    url = f"{GRAPH}/users/{cfg['mailbox']}/mailFolders/{folder}/messages"
     items: list[dict] = []
     while url and len(items) < MAX_PER_POLL:
         resp = httpx.get(url, params=params, headers=headers, timeout=TIMEOUT)

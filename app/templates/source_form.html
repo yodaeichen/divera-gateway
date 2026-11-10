@@ -14,7 +14,7 @@
     <div><label>Anwendungs-ID (Client-ID)</label><input type="text" name="client_id" value="{{ cfg.client_id or '' }}" required></div>
     <div><label>Geheimer Clientschlüssel</label><input type="password" name="client_secret" autocomplete="new-password" placeholder="{{ 'gespeichert, leer lassen zum Beibehalten' if source else '' }}" {{ '' if source else 'required' }}></div>
     <div><label>Postfach (E-Mail-Adresse)</label><input type="text" name="mailbox" value="{{ cfg.mailbox or '' }}" required></div>
-    <div><label>Ordner</label><input type="text" name="folder" value="{{ cfg.folder or 'inbox' }}"><p class="hint">Standardnamen wie <code>inbox</code> oder eine Ordner-ID.</p></div>
+    <div><label>Ordner</label><input type="text" name="folder" value="{{ cfg.folder or 'inbox' }}"><p class="hint">Unterordner mit Schrägstrich, z. B. <code>Posteingang/Alarme</code>. Schreibweise wie in Outlook.</p></div>
   </div>
   <p class="hint">Benötigt eine App-Registrierung in Entra ID mit der Anwendungsberechtigung Mail.Read. Anleitung in der README.</p>
   {% elif stype == 'imap' %}
