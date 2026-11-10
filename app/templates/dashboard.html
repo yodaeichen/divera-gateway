@@ -1,24 +1,29 @@
 {% extends "base.html" %}
+{% block head %}<meta http-equiv="refresh" content="30">{% endblock %}
 {% block content %}
 <div class="row"><h1>Kunden</h1><a class="btn" href="/tenants/new">Kunde anlegen</a></div>
 <div class="card">
 <table>
-<tr><th>Name</th><th>Quellen</th><th>Regeln</th><th>Status</th><th>Letzter Abruf</th><th></th></tr>
+<tr><th>Name</th><th>Quellen</th><th>Regeln</th><th>Status</th><th>Letzter Abruf</th><th>Nächster Abruf</th><th></th></tr>
 {% for t in tenants %}
 <tr>
   <td><a href="/tenants/{{ t.id }}"><strong>{{ t.name }}</strong></a></td>
   <td>{{ t.sources|length }}{% set errs = t.sources|selectattr('last_error')|list %}{% if errs %} <span class="tag fehler">{{ errs|length }} mit Fehler</span>{% endif %}</td>
   <td>{{ t.rules|length }}</td>
   <td>{% if not t.active %}<span class="tag">inaktiv</span>{% elif t.test_mode %}<span class="tag test">Testmodus</span>{% else %}<span class="tag gesendet">scharf</span>{% endif %}</td>
-  {% set polls = t.sources|selectattr('last_poll')|map(attribute='last_poll')|list %}
-  <td>{{ (polls|max)|localtime if polls else 'noch nie' }}</td>
+  {% set plan = schedule[t.id] %}
+  <td>{{ plan.last|localtime if plan.last else 'noch nie' }}</td>
+  <td>{% if not plan.next %}<span class="hint">{{ 'Kunde inaktiv' if not t.active else 'kein Postfach' }}</span>
+      {% elif plan.due %}läuft gerade an{% else %}{{ plan.next|localtime }}{% endif %}
+      {% if plan.interval %}<br><span class="hint">alle {{ plan.interval }} Sekunden</span>{% endif %}</td>
   <td style="text-align:right"><form method="post" action="/tenants/{{ t.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="home">
     <button class="light" {{ 'disabled' if not t.active }}>Jetzt abrufen</button></form></td>
 </tr>
 {% else %}
-<tr><td colspan="6">Noch kein Kunde angelegt.</td></tr>
+<tr><td colspan="7">Noch kein Kunde angelegt.</td></tr>
 {% endfor %}
 </table>
+<p class="hint">Diese Seite lädt sich alle 30 Sekunden neu.</p>
 </div>
 <div class="card">
   <div class="row"><h2>Letzte Ereignisse</h2><a href="/logs">Ganzes Protokoll</a></div>

@@ -185,9 +185,12 @@ with TestClient(app, base_url="http://testserver") as c:
         return [{"id": "m-1", "from": "ls@x.de", "subject": "Alarm manuell", "body": body, "date": "", "ts": now}], {"since": "x"}
     sources.POLLERS["m365"] = fake_poll
     home = c.get("/").text
+    assert "Nächster Abruf" in home and "läuft gerade an" in home and "alle 30 Sekunden" in home and 'http-equiv="refresh"' in home
+    assert 'http-equiv="refresh"' not in c.get("/logs").text
     assert "Jetzt abrufen" in home and 'action="/tenants/1/poll"' in home
     r = c.post("/tenants/1/poll", data={"csrf": tok, "back": "home"})
     assert "1 Postfach abgerufen, 1 neue Nachricht." in r.text and calls == ["a@b.de"] and "Alarm manuell" in r.text
+    assert "läuft gerade an" not in r.text and re.search(r"<td>\s*\d\d\.\d\d\.\d{4} \d\d:\d\d:\d\d\s*<br><span class=\"hint\">alle 30", r.text), "nächster Abruf als Uhrzeit"
     assert "0 neue Nachrichten" in c.post("/tenants/1/poll", data={"csrf": tok}).text, "dieselbe Nachricht nicht doppelt"
     sources.POLLERS["m365"] = lambda cfg, state: (_ for _ in ()).throw(RuntimeError("kaputt"))
     assert "Fehler bei: Leitstelle" in c.post("/tenants/1/poll", data={"csrf": tok, "back": "home"}).text

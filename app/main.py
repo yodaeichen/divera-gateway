@@ -170,7 +170,16 @@ async def logout(request: Request):
 def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     tenants = db.scalars(select(m.Tenant).order_by(m.Tenant.name)).all()
     logs = db.scalars(select(m.Log).order_by(m.Log.id.desc()).limit(15)).all()
-    return page(request, "dashboard.html", user, tenants=tenants, logs=logs)
+    now, schedule = m.utcnow(), {}
+    for tenant in tenants:  # letzter und nächster Abruf je Kunde, über alle aktiven Postfächer
+        pollable = [s for s in tenant.sources if s.active and s.type in sources.POLLERS]
+        polled = [s.last_poll for s in pollable if s.last_poll]
+        info = {"last": max(polled) if polled else None, "next": None, "due": False, "interval": None}
+        if tenant.active and pollable:
+            upcoming = [s.last_poll + dt.timedelta(seconds=s.poll_interval) if s.last_poll else now for s in pollable]
+            info.update(next=min(upcoming), due=min(upcoming) <= now, interval=min(s.poll_interval for s in pollable))
+        schedule[tenant.id] = info
+    return page(request, "dashboard.html", user, tenants=tenants, logs=logs, schedule=schedule)
 
 
 @app.get("/tenants/new")
