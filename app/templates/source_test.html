@@ -14,6 +14,7 @@
     {% for k, v in result.last.fields.items() %}<tr><th><code>{{ '{' ~ k ~ '}' }}</code></th><td>{{ v }}</td></tr>{% endfor %}
   </table>
   <p class="hint">Die Feldnamen links kannst du so als Platzhalter in Regeln verwenden.</p>
+  <form method="post" action="/sources/{{ source.id }}/suggest"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Regel daraus vorschlagen</button></form>
   {% else %}
   <p>Seit dem Anlegen oder letzten Speichern der Quelle ist noch nichts eingegangen.</p>
   {% endif %}
@@ -24,14 +25,15 @@
 <div class="card">
   <h2>Die neuesten Nachrichten im Ordner</h2>
   <table>
-  <tr><th>Empfangen</th><th>Absender</th><th>Betreff</th>{% if source.type == 'm365' %}<th>Textanfang</th>{% endif %}</tr>
+  <tr><th>Empfangen</th><th>Absender</th><th>Betreff</th>{% if source.type == 'm365' %}<th>Textanfang</th>{% endif %}<th></th></tr>
   {% for i in result['items'] %}
-  <tr><td style="white-space:nowrap">{{ i.ts|localtime if i.ts else '' }}</td><td>{{ i.from }}</td><td><strong>{{ i.subject }}</strong></td>{% if source.type == 'm365' %}<td class="detail">{{ i.preview }}</td>{% endif %}</tr>
+  <tr><td style="white-space:nowrap">{{ i.ts|localtime if i.ts else '' }}</td><td>{{ i.from }}</td><td><strong>{{ i.subject }}</strong></td>{% if source.type == 'm365' %}<td class="detail">{{ i.preview }}</td>{% endif %}
+    <td><form method="post" action="/sources/{{ source.id }}/suggest"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="ref" value="{{ i.ref }}"><button class="light" style="white-space:nowrap">Regel vorschlagen</button></form></td></tr>
   {% else %}
-  <tr><td colspan="4">Der Ordner ist leer.</td></tr>
+  <tr><td colspan="5">Der Ordner ist leer.</td></tr>
   {% endfor %}
   </table>
-  <p class="hint">Nur zur Kontrolle angezeigt, nichts davon wird gespeichert oder an DIVERA übergeben.</p>
+  <p class="hint">Nur zur Kontrolle angezeigt, nichts davon wird gespeichert oder an DIVERA übergeben. „Regel vorschlagen" öffnet eine vorausgefüllte, noch ungespeicherte Regel mit dieser Nachricht als Beispiel.</p>
 </div>
 {% endif %}
 <p><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zum Kunden</a> <a class="btn light" href="/sources/{{ source.id }}/edit">Quelle bearbeiten</a></p>

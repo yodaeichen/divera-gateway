@@ -32,8 +32,11 @@ def match_rule(rule: m.Rule, msg: dict) -> dict | None:
         return None
     values = {k: str(v) for k, v in (msg.get("extra") or {}).items()}
     values.update({"from": msg["from"], "subject": msg["subject"], "body": msg["body"], "date": msg.get("date", "")})
-    if rule.extract_regex:
-        found = re.search(rule.extract_regex, msg["subject"] + "\n" + msg["body"], re.M | re.I)
+    haystack = msg["subject"] + "\n" + msg["body"].replace("\r\n", "\n")
+    for line in (rule.extract_regex or "").splitlines():  # ein Ausdruck je Zeile
+        if not line.strip():
+            continue
+        found = re.search(line.strip(), haystack, re.M | re.I)
         if found:
             values.update({k: (v or "").strip() for k, v in found.groupdict().items()})
         elif rule.require_regex:

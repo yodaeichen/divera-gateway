@@ -57,10 +57,20 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "ungültig" in c.post("/rules/save", data={"csrf": tok, "tenant_id": "1", "name": "kaputt", "extract_regex": "("}).text
 
     body = "Stichwort: B2 Wohnungsbrand\nOrt: Musterstraße 1, Musterstadt\n"
-    r = c.post("/rules/1/test", data={"csrf": tok, "t_from": "ls@x.de", "t_subject": "ALARM", "t_body": body})
-    assert "Die Regel greift." in r.text and "B2 Wohnungsbrand" in r.text
-    r = c.post("/rules/1/test", data={"csrf": tok, "t_from": "ls@x.de", "t_subject": "Info", "t_body": body})
-    assert "greift bei dieser Nachricht nicht" in r.text
+    RULE = {"csrf": tok, "id": "1", "tenant_id": "1", "name": "Brand", "match_subject": "alarm", "require_regex": "on",
+            "extract_regex": "^Stichwort:\\s*(?P<stichwort>.+)$\r\n^Ort:\\s*(?P<ort>.+)$", "title_tpl": "{stichwort}",
+            "text_tpl": "{subject} von {from} {geraet}", "address_tpl": "{ort}", "ric": "LZ1", "priority": "on",
+            "extra_params": "group_ids=1,2\naccesskey=boese", "stop": "on", "active": "on", "t_from": "ls@x.de"}
+    r = c.post("/rules/test", data=dict(RULE, t_subject="ALARM", t_body=body.replace("\n", "\r\n")))
+    assert "Die Regel greift" in r.text and "B2 Wohnungsbrand" in r.text and "Musterstraße 1, Musterstadt" in r.text
+    assert "greift bei der Beispielnachricht nicht" in c.post("/rules/test", data=dict(RULE, t_subject="Info", t_body=body)).text
+    assert "greift bei der Beispielnachricht nicht" in c.post("/rules/test", data=dict(RULE, t_subject="Alarm", t_body="Stichwort: X")).text
+    r = c.post("/rules/test", data=dict(RULE, name="NICHT SPEICHERN", extract_regex="(", t_subject="Alarm", t_body=body))
+    assert "Zeile 1 ungültig" in r.text
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, 1).name == "Brand", "Probelauf darf nichts speichern"
+    r = c.post("/rules/save", data=dict(RULE, t_subject="Alarm", t_body=body))  # mehrzeilige Ausdrücke speichern
+    assert "Regel gespeichert" in r.text and "Die Regel greift" in r.text
 
     r = c.post(f"/hook/{hook}", json={"subject": "Alarm BMA", "body": body, "geraet": "BMZ-7"})
     assert r.json() == {"ok": True, "matched": 1}, r.text
@@ -72,11 +82,26 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "Letzter Empfang" in last and "{geraet}" in last and "BMZ-7" in last
     import datetime as dt
     sources.TESTERS["m365"] = lambda cfg: {"message": "Verbindung in Ordnung", "items": [
-        {"ts": dt.datetime(2026, 11, 10, 9, 0), "from": "ls@x.de", "subject": "Probealarm <b>", "preview": "Textanfang"}]}
+        {"ts": dt.datetime(2026, 11, 10, 9, 0), "from": "ls@x.de", "subject": "Probealarm <b>", "preview": "Textanfang", "ref": "AAMk=1"}]}
     shown = c.post("/sources/1/test", data={"csrf": tok}).text
     assert "Probealarm &lt;b&gt;" in shown and "10.11.2026 10:00:00" in shown and "Textanfang" in shown
     sources.TESTERS["m365"] = lambda cfg: (_ for _ in ()).throw(RuntimeError("Ordner 'X' nicht gefunden"))
     assert "Test fehlgeschlagen" in c.post("/sources/1/test", data={"csrf": tok}).text
+
+    # Regelvorschlag aus einer Nachricht
+    assert 'name="ref" value="AAMk=1"' in shown and "Regel vorschlagen" in shown
+    mail = ("Einsatznummer: 2026-004711\r\nEinsatzstichwort: B3 - Brand Gebäude\r\nStraße / Nr.: Hauptstr. 12\r\n"
+            "Ort: 63679 Eichen\r\nBemerkung: Rauch aus Dachstuhl\r\nhttp://karte.example/1\r\n")
+    sources.FETCHERS["m365"] = lambda cfg, ref: {"from": "leitstelle@kreis.example", "subject": "Alarmierung FF Eichen 10.11.2026 16:02", "body": mail}
+    sug = c.post("/sources/1/suggest", data={"csrf": tok, "ref": "AAMk=1"}).text
+    assert "Vorschlag aus der Beispielnachricht" in sug and "Die Regel greift" in sug
+    assert 'value="Alarmierung FF Eichen"' in sug and 'value="leitstelle@kreis.example"' in sug
+    assert 'value="{einsatzstichwort}"' in sug and 'value="{strasse_nr}, {ort}"' in sug and "{bemerkung}" in sug
+    assert "B3 - Brand Gebäude" in sug and "Hauptstr. 12, 63679 Eichen" in sug and "karte.example" not in sug.split("<form")[0]
+    with m.SessionLocal() as db:
+        assert db.query(m.Rule).count() == 1, "Vorschlag darf nicht automatisch gespeichert werden"
+    hooksug = c.post("/sources/2/suggest", data={"csrf": tok}).text
+    assert "Übergebene Felder" in hooksug and "{geraet}" in hooksug
     logs = c.get("/logs").text
     assert "Testmodus, nicht gesendet" in logs and "BMZ-7" in logs and "ignoriert" in logs
     assert "boese" not in logs and "geheim123" not in logs

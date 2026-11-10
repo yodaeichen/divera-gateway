@@ -11,6 +11,7 @@ import imaplib
 import re
 from email import policy
 from email.utils import parseaddr, parsedate_to_datetime
+from urllib.parse import quote
 
 import httpx
 
@@ -135,7 +136,7 @@ def _naive_utc(value: dt.datetime) -> dt.datetime:
 def test_m365(cfg: dict) -> dict:
     """Verbindungstest: liefert die neuesten Nachrichten des Ordners zur Kontrolle."""
     raw = _graph_messages(cfg, {"$top": str(PREVIEW_COUNT), "$orderby": "receivedDateTime desc",
-                                "$select": "subject,from,receivedDateTime,bodyPreview"}, limit=PREVIEW_COUNT)
+                                "$select": "id,subject,from,receivedDateTime,bodyPreview"}, limit=PREVIEW_COUNT)
     items = []
     for item in raw:
         received = item.get("receivedDateTime", "")
@@ -143,6 +144,7 @@ def test_m365(cfg: dict) -> dict:
             "ts": _naive_utc(dt.datetime.fromisoformat(received.replace("Z", "+00:00"))) if received else None,
             "from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
             "subject": item.get("subject") or "", "preview": (item.get("bodyPreview") or "")[:200],
+            "ref": item.get("id", ""),
         })
     return {"message": "Verbindung in Ordnung, Anmeldung und Ordner erreichbar.", "items": items}
 
@@ -170,6 +172,21 @@ def _imap_uids(conn: imaplib.IMAP4, criteria: str) -> list[int]:
     return sorted(int(u) for u in (data[0] or b"").split())
 
 
+def _parse_mail(raw: bytes) -> tuple[str, str, str, dt.datetime]:
+    """Zerlegt eine Roh-Mail in Absender, Betreff, Text und Zeitpunkt (UTC)."""
+    mail = email.message_from_bytes(raw, policy=policy.default)
+    part = mail.get_body(preferencelist=("plain", "html"))
+    body = part.get_content() if part else ""
+    if part and part.get_content_type() == "text/html":
+        body = html_to_text(body)
+    try:
+        ts = parsedate_to_datetime(str(mail["Date"]))
+        ts = ts.replace(tzinfo=dt.timezone.utc) if ts.tzinfo is None else ts.astimezone(dt.timezone.utc)
+    except (TypeError, ValueError):
+        ts = _now()
+    return parseaddr(str(mail.get("From", "")))[1], str(mail.get("Subject", "")), str(body).strip(), ts
+
+
 def poll_imap(cfg: dict, state: dict) -> tuple[list[dict], dict]:
     conn = _imap_connect(cfg)
     try:
@@ -186,21 +203,9 @@ def poll_imap(cfg: dict, state: dict) -> tuple[list[dict], dict]:
             last = uid
             if status != "OK" or not data or not isinstance(data[0], tuple):
                 continue
-            mail = email.message_from_bytes(data[0][1], policy=policy.default)
-            part = mail.get_body(preferencelist=("plain", "html"))
-            body = part.get_content() if part else ""
-            if part and part.get_content_type() == "text/html":
-                body = html_to_text(body)
-            try:
-                ts = parsedate_to_datetime(str(mail["Date"]))
-                ts = ts.replace(tzinfo=dt.timezone.utc) if ts.tzinfo is None else ts.astimezone(dt.timezone.utc)
-            except (TypeError, ValueError):
-                ts = _now()
-            messages.append({
-                "id": f"{validity}:{uid}", "from": parseaddr(str(mail.get("From", "")))[1],
-                "subject": str(mail.get("Subject", "")), "body": str(body).strip(),
-                "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": ts,
-            })
+            sender, subject, body, ts = _parse_mail(data[0][1])
+            messages.append({"id": f"{validity}:{uid}", "from": sender, "subject": subject, "body": body,
+                             "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": ts})
         return messages, {"uidvalidity": validity, "last_uid": last}
     finally:
         try:
@@ -224,7 +229,7 @@ def test_imap(cfg: dict) -> dict:
             except (TypeError, ValueError):
                 ts = None
             items.append({"ts": ts, "from": parseaddr(str(mail.get("From", "")))[1],
-                          "subject": str(mail.get("Subject", "")), "preview": ""})
+                          "subject": str(mail.get("Subject", "")), "preview": "", "ref": str(uid)})
     finally:
         try:
             conn.logout()
@@ -233,5 +238,35 @@ def test_imap(cfg: dict) -> dict:
     return {"message": "Verbindung in Ordnung, Anmeldung und Ordner erreichbar.", "items": items}
 
 
+def fetch_m365(cfg: dict, ref: str) -> dict:
+    """Holt eine einzelne Nachricht vollständig, als Vorlage für einen Regelvorschlag."""
+    headers = {"Authorization": f"Bearer {_graph_token(cfg)}", "Prefer": 'outlook.body-content-type="text"'}
+    resp = httpx.get(f"{GRAPH}/users/{cfg['mailbox']}/messages/{quote(ref, safe='')}",
+                     params={"$select": "subject,from,body"}, headers=headers, timeout=TIMEOUT)
+    if resp.status_code != 200:
+        raise RuntimeError(f"Graph-Fehler {resp.status_code} beim Laden der Nachricht.")
+    item = resp.json()
+    return {"from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
+            "subject": item.get("subject") or "", "body": ((item.get("body") or {}).get("content") or "").strip()}
+
+
+def fetch_imap(cfg: dict, ref: str) -> dict:
+    if not ref.isdigit():
+        raise RuntimeError("Ungültige Nachrichtenkennung.")
+    conn = _imap_connect(cfg)
+    try:
+        status, data = conn.uid("fetch", ref, "(BODY.PEEK[])")
+        if status != "OK" or not data or not isinstance(data[0], tuple):
+            raise RuntimeError("Nachricht nicht mehr vorhanden.")
+        sender, subject, body, _ = _parse_mail(data[0][1])
+        return {"from": sender, "subject": subject, "body": body}
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+
+FETCHERS = {"m365": fetch_m365, "imap": fetch_imap}
 POLLERS = {"m365": poll_m365, "imap": poll_imap}
 TESTERS = {"m365": test_m365, "imap": test_imap}

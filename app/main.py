@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as m
-from . import rules, sources, worker
+from . import rules, sources, suggest, worker
 from . import security as sec
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -308,24 +308,8 @@ def rule_page(request, user, tenant, rule, **extra):
     return page(request, "rule_form.html", user, tenant=tenant, rule=rule, **extra)
 
 
-@app.get("/tenants/{tid}/rules/new")
-def rule_new(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    return rule_page(request, user, need(db.get(m.Tenant, tid)), None)
-
-
-@app.get("/rules/{rid}/edit")
-def rule_edit(rid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    rule = need(db.get(m.Rule, rid))
-    return rule_page(request, user, rule.tenant, rule)
-
-
-@app.post("/rules/save")
-async def rule_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    form = await read_form(request)
-    if form.get("id"):
-        rule = need(db.get(m.Rule, int(form["id"])))
-    else:
-        rule = m.Rule(tenant_id=need(db.get(m.Tenant, int(form["tenant_id"]))).id)
+def apply_rule_form(rule: m.Rule, form, db: Session) -> str:
+    """Überträgt die Formularwerte auf die Regel. Gibt eine Fehlermeldung zurück oder ''."""
     rule.name = text(form, "name", 120) or "Regel"
     rule.active, rule.priority = "active" in form, "priority" in form
     rule.require_regex, rule.stop = "require_regex" in form, "stop" in form
@@ -342,32 +326,110 @@ async def rule_save(request: Request, db: Session = Depends(get_db), user: m.Use
         setattr(rule, key, text(form, key, 200))
     rule.ric = text(form, "ric", 300)
     for key in ("extract_regex", "title_tpl", "text_tpl", "address_tpl", "extra_params"):
-        setattr(rule, key, text(form, key, 4000))
+        setattr(rule, key, str(form.get(key, "")).replace("\r\n", "\n").strip()[:4000])
+    for number, line in enumerate(rule.extract_regex.splitlines(), 1):
+        try:
+            re.compile(line)
+        except re.error as exc:
+            return f"Ausdruck in Zeile {number} ungültig: {exc}."
+    return ""
+
+
+def read_sample(form) -> dict | None:
+    if not (form.get("t_from") or form.get("t_subject") or form.get("t_body")):
+        return None
+    return {"from": text(form, "t_from"), "subject": text(form, "t_subject"),
+            "body": str(form.get("t_body", "")).replace("\r\n", "\n")[:20000],
+            "date": m.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+
+def evaluate(rule: m.Rule, sample: dict) -> dict:
+    """Probelauf einer Regel gegen eine Beispielnachricht, ohne etwas zu senden."""
     try:
-        re.compile(rule.extract_regex)
+        values = rules.match_rule(rule, sample)
     except re.error as exc:
-        db.rollback()
-        flash(request, f"Regulärer Ausdruck ungültig: {exc}. Nichts gespeichert.", "err")
-        return go(f"/rules/{rule.id}/edit" if rule.id else f"/tenants/{rule.tenant_id}/rules/new")
+        return {"match": False, "error": str(exc)}
+    return {"match": values is not None, "payload": rules.build_payload(rule, values) if values else None,
+            "values": {k: v for k, v in (values or {}).items() if k != "body"}}
+
+
+def unsaved_rule(form, db: Session) -> m.Rule:
+    """Regel nur im Speicher, damit ein Probelauf oder Fehler nichts an der Datenbank ändert."""
+    rule = m.Rule()
+    if form.get("id"):
+        existing = need(db.get(m.Rule, int(form["id"])))
+        rule.id, rule.tenant_id = existing.id, existing.tenant_id
+    else:
+        rule.tenant_id = need(db.get(m.Tenant, int(form["tenant_id"]))).id
+    return rule
+
+
+@app.get("/tenants/{tid}/rules/new")
+def rule_new(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    return rule_page(request, user, need(db.get(m.Tenant, tid)), None)
+
+
+@app.get("/rules/{rid}/edit")
+def rule_edit(rid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    rule = need(db.get(m.Rule, rid))
+    return rule_page(request, user, rule.tenant, rule)
+
+
+@app.post("/rules/test")
+async def rule_test(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    form = await read_form(request)
+    rule = unsaved_rule(form, db)
+    error = apply_rule_form(rule, form, db)
+    sample = read_sample(form)
+    tenant = need(db.get(m.Tenant, rule.tenant_id))
+    if not error and not sample:
+        error = "Zum Prüfen bitte unten eine Beispielnachricht eintragen."
+    result = evaluate(rule, sample) if sample and not error else None
+    return rule_page(request, user, tenant, rule, sample=sample, result=result, error=error)
+
+
+@app.post("/rules/save")
+async def rule_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    form = await read_form(request)
+    draft = unsaved_rule(form, db)
+    error = apply_rule_form(draft, form, db)
+    sample = read_sample(form)
+    if error:
+        return rule_page(request, user, need(db.get(m.Tenant, draft.tenant_id)), draft, sample=sample, error=error)
+    rule = need(db.get(m.Rule, draft.id)) if draft.id else m.Rule(tenant_id=draft.tenant_id)
+    apply_rule_form(rule, form, db)
     db.add(rule)
     db.commit()
+    if sample:  # Beispielnachricht stehen lassen, damit man weiter herantesten kann
+        return rule_page(request, user, rule.tenant, rule, sample=sample, result=evaluate(rule, sample), just_saved=True)
     flash(request, "Regel gespeichert.")
     return go(f"/rules/{rule.id}/edit")
 
 
-@app.post("/rules/{rid}/test")
-async def rule_test(rid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+@app.post("/sources/{sid}/suggest")
+async def rule_suggest(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    """Erzeugt aus einer Nachricht der Quelle einen ungespeicherten Regelvorschlag."""
     form = await read_form(request)
-    rule = need(db.get(m.Rule, rid))
-    sample = {"from": text(form, "t_from"), "subject": text(form, "t_subject"),
-              "body": str(form.get("t_body", ""))[:20000], "date": m.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}
-    try:
-        values = rules.match_rule(rule, sample)
-        result = {"match": values is not None, "payload": rules.build_payload(rule, values) if values else None,
-                  "values": {k: v for k, v in (values or {}).items() if k != "body"}}
-    except re.error as exc:
-        result = {"match": False, "error": str(exc)}
-    return rule_page(request, user, rule.tenant, rule, sample=sample, result=result)
+    source = need(db.get(m.Source, sid))
+    if source.type == "webhook":
+        last = json.loads(source.state or "{}").get("last")
+        if not last:
+            flash(request, "Für diese Quelle ist noch nichts eingegangen.", "err")
+            return go(f"/tenants/{source.tenant_id}")
+        msg = {"from": last.get("from", ""), "subject": last.get("subject", ""), "body": last.get("body", ""),
+               "extra": last.get("fields") or {}}
+    else:
+        try:
+            msg = await asyncio.to_thread(sources.FETCHERS[source.type], source.config, text(form, "ref", 600))
+        except Exception as exc:
+            flash(request, f"Nachricht konnte nicht geladen werden ({type(exc).__name__}: {str(exc)[:200]})", "err")
+            return go(f"/tenants/{source.tenant_id}")
+    proposal = suggest.suggest(msg)
+    rule = m.Rule(tenant_id=source.tenant_id, source_id=source.id, active=True, position=10, match_body="",
+                  require_regex=False, kind="alarm", ric="", priority=False, extra_params="", stop=True,
+                  **proposal["fields"])
+    sample = dict(msg, body=msg["body"][:20000], date=m.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
+    return rule_page(request, user, source.tenant, rule, sample=sample, result=evaluate(rule, sample), notes=proposal["notes"])
 
 
 @app.post("/rules/{rid}/delete")
@@ -470,7 +532,7 @@ async def webhook(token: str, request: Request, db: Session = Depends(get_db)):
     # Letzten Empfang für die Kontrollansicht merken (gekürzt, ohne den vollständigen Text)
     source.state = json.dumps({"last": {
         "ts": dt.datetime.now(TZ).strftime("%d.%m.%Y %H:%M:%S"), "from": msg["from"][:200], "subject": msg["subject"][:300],
-        "preview": msg["body"][:200], "fields": {k: str(v)[:100] for k, v in list(extra.items())[:30]}}})
+        "preview": msg["body"][:200], "body": msg["body"][:4000], "fields": {k: str(v)[:100] for k, v in list(extra.items())[:30]}}})
     db.commit()
     matched = await asyncio.to_thread(_webhook_process, source.id, msg)
     return JSONResponse({"ok": True, "matched": matched})

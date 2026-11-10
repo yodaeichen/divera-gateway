@@ -1,10 +1,34 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ 'Regel bearbeiten' if rule else 'Regel anlegen' }} <span class="hint">({{ tenant.name }})</span></h1>
+{% set saved = rule and rule.id %}
+<h1>{{ 'Regel bearbeiten' if saved else 'Regel anlegen' }} <span class="hint">({{ tenant.name }})</span></h1>
+
+{% if error %}<div class="flash err">{{ error }} Es wurde nichts gespeichert.</div>{% endif %}
+{% if just_saved %}<div class="flash">Regel gespeichert.</div>{% endif %}
+{% if notes %}
 <div class="card">
+  <h2>Vorschlag aus der Beispielnachricht</h2>
+  <ul>{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul>
+  <p class="hint">Der Vorschlag ist noch nicht gespeichert. Passe die Felder an, drücke unten „Prüfen ohne Speichern", bis das Ergebnis stimmt, und speichere dann.</p>
+</div>
+{% endif %}
+{% if result %}
+<div class="card">
+  <h2>Ergebnis des Probelaufs</h2>
+  {% if result.error %}<div class="flash err">Ausdruck fehlerhaft: {{ result.error }}</div>
+  {% elif result.match %}<div class="flash">Die Regel greift bei der Beispielnachricht. Das würde an DIVERA gehen:</div>
+  <pre>{{ result.payload|tojson(indent=2) }}</pre>
+  <p class="hint">Verfügbare Platzhalter: {% for k, v in result['values'].items() %}<code>{{ '{' ~ k ~ '}' }}</code> = {{ v }}{{ ', ' if not loop.last }}{% endfor %}, <code>{body}</code> = ganzer Text</p>
+  {% else %}<div class="flash err">Die Regel greift bei der Beispielnachricht nicht. Prüfe die Bedingungen{% if rule.require_regex %} und ob jeder Ausdruck etwas findet{% endif %}.</div>{% endif %}
+  <p class="hint">Es wurde nichts gesendet.</p>
+</div>
+{% endif %}
+
 <form method="post" action="/rules/save">
+<div class="card">
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  {% if rule %}<input type="hidden" name="id" value="{{ rule.id }}">{% else %}<input type="hidden" name="tenant_id" value="{{ tenant.id }}">{% endif %}
+  {% if saved %}<input type="hidden" name="id" value="{{ rule.id }}">{% endif %}
+  <input type="hidden" name="tenant_id" value="{{ tenant.id }}">
   <div class="grid">
     <div><label>Name</label><input type="text" name="name" value="{{ rule.name if rule else '' }}" required></div>
     <div><label>Rang</label><input type="number" name="position" value="{{ rule.position if rule else 10 }}"></div>
@@ -21,13 +45,13 @@
     <div><label>Betreff enthält</label><input type="text" name="match_subject" value="{{ rule.match_subject if rule else '' }}"></div>
   </div>
   <label>Text enthält</label><input type="text" name="match_body" value="{{ rule.match_body if rule else '' }}">
-  <label>Regulärer Ausdruck zum Herauslesen von Werten (optional)</label>
-  <textarea name="extract_regex" spellcheck="false">{{ rule.extract_regex if rule else '' }}</textarea>
-  <p class="hint">Wird auf Betreff und Text angewendet. Benannte Gruppen werden zu Platzhaltern, z. B. <code>Stichwort:\s*(?P&lt;stichwort&gt;.+)</code> ergibt <code>{stichwort}</code>.</p>
-  <label class="check"><input type="checkbox" name="require_regex" {{ 'checked' if rule and rule.require_regex }}> Regel greift nur, wenn der Ausdruck etwas findet</label>
+  <label>Ausdrücke zum Herauslesen von Werten (optional, einer je Zeile)</label>
+  <textarea name="extract_regex" spellcheck="false" style="min-height:130px" wrap="off">{{ rule.extract_regex if rule else '' }}</textarea>
+  <p class="hint">Jede Zeile ist ein regulärer Ausdruck und wird einzeln auf Betreff und Text angewendet. Benannte Gruppen werden zu Platzhaltern, z. B. <code>^Stichwort:\s*(?P&lt;stichwort&gt;.+)$</code> ergibt <code>{stichwort}</code>. Zeilen, die du nicht brauchst, kannst du löschen.</p>
+  <label class="check"><input type="checkbox" name="require_regex" {{ 'checked' if rule and rule.require_regex }}> Regel greift nur, wenn jeder Ausdruck etwas findet</label>
 
   <h2 style="margin-top:22px">Was geht an DIVERA?</h2>
-  <p class="hint">Platzhalter: <code>{subject}</code> <code>{from}</code> <code>{body}</code> <code>{date}</code>, dazu die Gruppen aus dem Ausdruck und bei Webhooks die übergebenen Felder.</p>
+  <p class="hint">Platzhalter: <code>{subject}</code> <code>{from}</code> <code>{body}</code> <code>{date}</code>, dazu die Gruppen aus den Ausdrücken und bei Webhooks die übergebenen Felder.</p>
   <div class="grid">
     <div><label>Art</label><select name="kind"><option value="alarm" {{ 'selected' if not rule or rule.kind == 'alarm' }}>Alarm</option><option value="news" {{ 'selected' if rule and rule.kind == 'news' }}>Mitteilung (leise)</option></select></div>
     <div><label>Empfänger (RIC, durch Komma getrennt)</label><input type="text" name="ric" value="{{ rule.ric if rule else '' }}"></div>
@@ -40,30 +64,21 @@
   <label class="check"><input type="checkbox" name="priority" {{ 'checked' if rule and rule.priority }}> Sonderrechte / Priorität</label>
   <label class="check"><input type="checkbox" name="stop" {{ 'checked' if not rule or rule.stop }}> Nach dieser Regel keine weiteren Regeln prüfen</label>
   <label class="check"><input type="checkbox" name="active" {{ 'checked' if not rule or rule.active }}> Aktiv</label>
-  <div class="actions"><button>Speichern</button><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zum Kunden</a></div>
-</form>
 </div>
 
-{% if rule %}
 <div class="card">
-  <h2>Regel ausprobieren</h2>
-  <p class="hint">Prüft die gespeicherte Regel gegen eine Beispielnachricht. Es wird nichts gesendet.</p>
-  <form method="post" action="/rules/{{ rule.id }}/test">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <div class="grid">
-      <div><label>Absender</label><input type="text" name="t_from" value="{{ sample.from if sample else '' }}"></div>
-      <div><label>Betreff</label><input type="text" name="t_subject" value="{{ sample.subject if sample else '' }}"></div>
-    </div>
-    <label>Text</label><textarea name="t_body" style="min-height:140px">{{ sample.body if sample else '' }}</textarea>
-    <div class="actions"><button class="light">Prüfen</button></div>
-  </form>
-  {% if result %}
-    {% if result.error %}<div class="flash err" style="margin-top:14px">Ausdruck fehlerhaft: {{ result.error }}</div>
-    {% elif result.match %}<div class="flash" style="margin-top:14px">Die Regel greift. Das würde an DIVERA gehen:</div>
-    <pre>{{ result.payload|tojson(indent=2) }}</pre>
-    <p class="hint">Erkannte Platzhalter: {% for k, v in result['values'].items() %}<code>{{ '{' ~ k ~ '}' }}</code> = {{ v }}{{ ', ' if not loop.last }}{% endfor %}</p>
-    {% else %}<div class="flash err" style="margin-top:14px">Die Regel greift bei dieser Nachricht nicht.</div>{% endif %}
-  {% endif %}
+  <h2>Beispielnachricht zum Ausprobieren</h2>
+  <p class="hint">Hier eine echte Nachricht einfügen oder über „Verbindung testen" bei der Quelle eine Nachricht übernehmen. Die Beispielnachricht wird nicht gespeichert.</p>
+  <div class="grid">
+    <div><label>Absender</label><input type="text" name="t_from" value="{{ sample.from if sample else '' }}"></div>
+    <div><label>Betreff</label><input type="text" name="t_subject" value="{{ sample.subject if sample else '' }}"></div>
+  </div>
+  <label>Text</label><textarea name="t_body" style="min-height:160px">{{ sample.body if sample else '' }}</textarea>
+  <div class="actions">
+    <button class="light" formaction="/rules/test">Prüfen ohne Speichern</button>
+    <button>Speichern</button>
+    <a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zum Kunden</a>
+  </div>
 </div>
-{% endif %}
+</form>
 {% endblock %}
