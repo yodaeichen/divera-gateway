@@ -52,3 +52,4 @@ main { max-width:1280px; }
 h2.step { margin-top:26px; padding-top:16px; border-top:1px solid var(--line); }
 .legend summary { cursor:pointer; font-weight:600; } .legend table { margin-top:12px; } .legend td { font-size:14px; }
 .card .hint + label, .card .hint + .grid { margin-top:14px; }
+button:disabled { opacity:.5; cursor:not-allowed; }

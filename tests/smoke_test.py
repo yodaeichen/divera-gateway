@@ -142,6 +142,22 @@ with TestClient(app, base_url="http://testserver") as c:
         assert worker.handle_message(db, webhook_src, old) == 0
     assert "veraltet" in c.get("/logs?status=veraltet").text
 
+    # Manueller Abruf je Kunde
+    calls = []
+    def fake_poll(cfg, state):
+        calls.append(cfg["mailbox"])
+        now = dt.datetime.now(dt.timezone.utc)
+        return [{"id": "m-1", "from": "ls@x.de", "subject": "Alarm manuell", "body": body, "date": "", "ts": now}], {"since": "x"}
+    sources.POLLERS["m365"] = fake_poll
+    home = c.get("/").text
+    assert "Jetzt abrufen" in home and 'action="/tenants/1/poll"' in home
+    r = c.post("/tenants/1/poll", data={"csrf": tok, "back": "home"})
+    assert "1 Postfach abgerufen, 1 neue Nachricht." in r.text and calls == ["a@b.de"] and "Alarm manuell" in r.text
+    assert "0 neue Nachrichten" in c.post("/tenants/1/poll", data={"csrf": tok}).text, "dieselbe Nachricht nicht doppelt"
+    sources.POLLERS["m365"] = lambda cfg, state: (_ for _ in ()).throw(RuntimeError("kaputt"))
+    assert "Fehler bei: Leitstelle" in c.post("/tenants/1/poll", data={"csrf": tok, "back": "home"}).text
+    assert c.post("/tenants/1/poll", data={}).status_code == 403
+
     assert sources.html_to_text("<p>Hallo<br>Welt &amp; Co</p><style>x</style>") == "Hallo\nWelt & Co"
     assert rules.render("{a}-{fehlt}-{a.__class__}", {"a": "x"}) == "x--{a.__class__}"
 

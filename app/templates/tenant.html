@@ -3,7 +3,8 @@
 <div class="row">
   <h1>{{ tenant.name }}
     {% if not tenant.active %}<span class="tag">inaktiv</span>{% elif tenant.test_mode %}<span class="tag test">Testmodus</span>{% else %}<span class="tag gesendet">scharf</span>{% endif %}</h1>
-  <a class="btn light" href="/tenants/{{ tenant.id }}/edit">Kunde bearbeiten</a>
+  <div><form class="inline" method="post" action="/tenants/{{ tenant.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light" {{ 'disabled' if not tenant.active }}>Jetzt abrufen</button></form>
+  <a class="btn light" href="/tenants/{{ tenant.id }}/edit">Kunde bearbeiten</a></div>
 </div>
 {% if not tenant.accesskey_enc %}<div class="flash err">Es ist noch kein DIVERA-Accesskey hinterlegt.</div>{% endif %}
 

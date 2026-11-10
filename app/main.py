@@ -204,6 +204,29 @@ async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.U
     return go(f"/tenants/{tenant.id}")
 
 
+@app.post("/tenants/{tid}/poll")
+async def tenant_poll(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    """Fragt alle Postfächer eines Kunden sofort ab, ohne auf das Intervall zu warten."""
+    form = await read_form(request)
+    tenant = need(db.get(m.Tenant, tid))
+    back = "/" if form.get("back") == "home" else f"/tenants/{tid}"
+    pollable = [s for s in tenant.sources if s.active and s.type in sources.POLLERS]
+    if not tenant.active:
+        flash(request, f"{tenant.name} ist inaktiv und wird nicht abgerufen.", "err")
+    elif not pollable:
+        flash(request, f"{tenant.name} hat keine aktiven Postfächer. Webhooks kommen von selbst an.", "err")
+    else:
+        results = await asyncio.gather(*(asyncio.to_thread(worker.run_source, s.id) for s in pollable))
+        new = sum(r["new"] for r in results)
+        failed = [s.name for s, r in zip(pollable, results) if r["error"]]
+        text_ = f"{tenant.name}: {len(pollable)} {'Postfach' if len(pollable) == 1 else 'Postfächer'} abgerufen, " \
+                f"{new} neue {'Nachricht' if new == 1 else 'Nachrichten'}."
+        if failed:
+            text_ += " Fehler bei: " + ", ".join(failed) + "."
+        flash(request, text_, "err" if failed else "ok")
+    return go(back)
+
+
 @app.post("/tenants/{tid}/delete")
 async def tenant_delete(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     await read_form(request)

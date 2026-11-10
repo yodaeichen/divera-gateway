@@ -39,11 +39,13 @@ def handle_message(db, source: m.Source, msg: dict) -> int:
     return rules.process_message(db, source, msg)
 
 
-def run_source(source_id: int):
+def run_source(source_id: int) -> dict:
+    """Fragt eine Quelle einmal ab. Gibt zurück, wie viele neue Nachrichten verarbeitet wurden und ob es einen Fehler gab."""
+    outcome = {"new": 0, "error": ""}
     with m.SessionLocal() as db:
         source = db.get(m.Source, source_id)
         if not source or not source.active or not source.tenant.active:
-            return
+            return outcome
         messages = []
         try:
             messages, state = sources.POLLERS[source.type](source.config, json.loads(source.state or "{}"))
@@ -51,16 +53,19 @@ def run_source(source_id: int):
             source.last_error = ""
         except Exception as exc:  # Verbindungsfehler dürfen den Dienst nicht beenden
             source.last_error = f"{type(exc).__name__}: {exc}"[:500]
+            outcome["error"] = source.last_error
         source.last_poll = m.utcnow()
         db.commit()
         for msg in messages:
             if already_processed(db, source.id, msg["id"]):
                 continue
+            outcome["new"] += 1
             try:
                 handle_message(db, source, msg)
             except Exception:
                 db.rollback()
                 log.exception("Verarbeitung fehlgeschlagen (Quelle %s)", source.id)
+    return outcome
 
 
 def prune():

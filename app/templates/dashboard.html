@@ -3,16 +3,20 @@
 <div class="row"><h1>Kunden</h1><a class="btn" href="/tenants/new">Kunde anlegen</a></div>
 <div class="card">
 <table>
-<tr><th>Name</th><th>Quellen</th><th>Regeln</th><th>Status</th></tr>
+<tr><th>Name</th><th>Quellen</th><th>Regeln</th><th>Status</th><th>Letzter Abruf</th><th></th></tr>
 {% for t in tenants %}
 <tr>
   <td><a href="/tenants/{{ t.id }}"><strong>{{ t.name }}</strong></a></td>
   <td>{{ t.sources|length }}{% set errs = t.sources|selectattr('last_error')|list %}{% if errs %} <span class="tag fehler">{{ errs|length }} mit Fehler</span>{% endif %}</td>
   <td>{{ t.rules|length }}</td>
   <td>{% if not t.active %}<span class="tag">inaktiv</span>{% elif t.test_mode %}<span class="tag test">Testmodus</span>{% else %}<span class="tag gesendet">scharf</span>{% endif %}</td>
+  {% set polls = t.sources|selectattr('last_poll')|map(attribute='last_poll')|list %}
+  <td>{{ (polls|max)|localtime if polls else 'noch nie' }}</td>
+  <td style="text-align:right"><form method="post" action="/tenants/{{ t.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="home">
+    <button class="light" {{ 'disabled' if not t.active }}>Jetzt abrufen</button></form></td>
 </tr>
 {% else %}
-<tr><td colspan="4">Noch kein Kunde angelegt.</td></tr>
+<tr><td colspan="6">Noch kein Kunde angelegt.</td></tr>
 {% endfor %}
 </table>
 </div>
