@@ -13,7 +13,7 @@
 </div>
 {% endif %}
 {% if result %}
-<div class="card">
+<div class="card" id="static-result">
   <h2>Ergebnis des Probelaufs</h2>
   {% if result.error %}<div class="flash err">Ausdruck fehlerhaft: {{ result.error }}</div>
   {% elif result.match %}<div class="flash">Die Regel greift bei der Beispielnachricht. Das würde an DIVERA gehen:</div>
@@ -24,7 +24,8 @@
 </div>
 {% endif %}
 
-<form method="post" action="/rules/save">
+<div class="split">
+<form method="post" action="/rules/save" id="rule-form">
 <div class="card">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   {% if saved %}<input type="hidden" name="id" value="{{ rule.id }}">{% endif %}
@@ -53,7 +54,8 @@
   <h2 style="margin-top:22px">Was geht an DIVERA?</h2>
   <p class="hint">Platzhalter: <code>{subject}</code> <code>{from}</code> <code>{body}</code> <code>{date}</code>, dazu die Gruppen aus den Ausdrücken und bei Webhooks die übergebenen Felder.</p>
   <div class="grid">
-    <div><label>Art</label><select name="kind"><option value="alarm" {{ 'selected' if not rule or rule.kind == 'alarm' }}>Alarm</option><option value="news" {{ 'selected' if rule and rule.kind == 'news' }}>Mitteilung (leise)</option></select></div>
+    <div><label>Art</label><select name="kind"><option value="alarm" {{ 'selected' if not rule or rule.kind == 'alarm' }}>Alarm</option><option value="news" {{ 'selected' if rule and rule.kind == 'news' }}>Mitteilung (leise)</option></select>
+      <p class="hint">Alarm: Einsatz mit Alarmton und Rückmeldung. Mitteilung: reine Information ohne Alarmierung.</p></div>
     <div><label>Empfänger (RIC, durch Komma getrennt)</label><input type="text" name="ric" value="{{ rule.ric if rule else '' }}"></div>
   </div>
   <label>Stichwort (höchstens 50 Zeichen)</label><input type="text" name="title_tpl" value="{{ rule.title_tpl if rule else '{subject}' }}">
@@ -81,4 +83,7 @@
   </div>
 </div>
 </form>
+<aside id="live" class="card live"><h2>Live-Ansicht</h2><p class="hint">Wird geladen. Ohne JavaScript bitte „Prüfen ohne Speichern" verwenden.</p></aside>
+</div>
+<script src="/static/rule_live.js?v=3" defer></script>
 {% endblock %}

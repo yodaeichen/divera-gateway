@@ -69,6 +69,23 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "Zeile 1 ungültig" in r.text
     with m.SessionLocal() as db:
         assert db.get(m.Rule, 1).name == "Brand", "Probelauf darf nichts speichern"
+    # Live-Ansicht
+    assert c.post("/rules/preview", data={k: v for k, v in RULE.items() if k != "t_from"}).json() == {"state": "nosample"}
+    live = c.post("/rules/preview", data=dict(RULE, t_subject="ALARM", t_body=body, title_tpl="{stichwort} " + "x" * 60 + " {gibtsnicht}")).json()
+    assert live["match"] and live["conditions"] == [{"label": "Betreff", "needle": "alarm", "ok": True}]
+    assert [e["ok"] for e in live["expressions"]] == [True, True] and live["expressions"][1]["groups"] == {"ort": "Musterstraße 1, Musterstadt"}
+    title = live["fields"][0]
+    assert title["length"] > 50 and len(title["value"]) == 50 and live["payload"]["title"] == title["value"]
+    assert live["unknown"] == ["geraet", "gibtsnicht"] and "accesskey" not in live["payload"] and "body" not in live["placeholders"]
+    live = c.post("/rules/preview", data=dict(RULE, t_subject="Info", t_body="Stichwort: X", extract_regex="^Stichwort: (?P<stichwort>.+)$\n(")).json()
+    assert not live["match"] and live["conditions"][0]["ok"] is False and "Zeile 2" in live["form_error"]
+    assert live["expressions"][0]["ok"] and live["expressions"][1]["error"]
+    assert c.post("/rules/preview", data={"id": "1"}).status_code == 403
+    page_html = c.get("/rules/1/edit").text
+    assert 'id="rule-form"' in page_html and 'id="live"' in page_html and "rule_live.js" in page_html
+    assert c.get("/static/rule_live.js").status_code == 200
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, 1).name == "Brand", "Live-Ansicht darf nichts speichern"
     r = c.post("/rules/save", data=dict(RULE, t_subject="Alarm", t_body=body))  # mehrzeilige Ausdrücke speichern
     assert "Regel gespeichert" in r.text and "Die Regel greift" in r.text
 

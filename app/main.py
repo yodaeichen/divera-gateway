@@ -388,6 +388,20 @@ async def rule_test(request: Request, db: Session = Depends(get_db), user: m.Use
     return rule_page(request, user, tenant, rule, sample=sample, result=result, error=error)
 
 
+@app.post("/rules/preview")
+async def rule_preview(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    """Live-Ansicht: wertet die gerade im Formular stehenden Werte aus. Speichert und sendet nichts."""
+    form = await read_form(request)
+    rule = unsaved_rule(form, db)
+    error = apply_rule_form(rule, form, db)
+    sample = read_sample(form)
+    if not sample:
+        return JSONResponse({"state": "nosample"})
+    data = rules.preview(rule, sample)
+    data.update(state="ok", form_error=error)
+    return JSONResponse(data)
+
+
 @app.post("/rules/save")
 async def rule_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     form = await read_form(request)

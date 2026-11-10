@@ -28,3 +28,22 @@ button.link { background:none; color:#b42318; padding:0; } form.inline { display
 code { background:#eef0f4; padding:1px 5px; border-radius:4px; font-size:13px; word-break:break-all; }
 pre { background:#101828; color:#e4e7ec; padding:12px; border-radius:6px; overflow:auto; font-size:13px; }
 .login { max-width:360px; margin:80px auto; }
+
+/* Regelseite mit Live-Ansicht */
+main { max-width:1280px; }
+.split { display:grid; grid-template-columns:minmax(0,1fr) 400px; gap:20px; align-items:start; }
+.live { position:sticky; top:16px; max-height:calc(100vh - 32px); overflow:auto; }
+@media (max-width:1000px){ .split{ grid-template-columns:1fr; } .live{ position:static; max-height:none; } }
+.live h3 { font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:16px 0 6px; }
+.live .state { padding:8px 12px; border-radius:6px; font-weight:600; background:#fde4e1; color:#b42318; }
+.live .state.ok { background:#dff3e7; color:var(--ok); }
+.live ul { list-style:none; margin:0; padding:0; } .live li { padding:3px 0; font-size:14px; word-break:break-word; }
+.live .yes::before { content:"\2713  "; color:var(--ok); font-weight:700; } .live .no::before { content:"\2717  "; color:#b42318; font-weight:700; }
+.live .msg { border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:6px; padding:10px 12px; }
+.live .msg.news { border-left-color:#0b5cad; } .live .msg.off { opacity:.45; }
+.live .msg .t { font-weight:700; font-size:16px; } .live .msg .a { color:var(--muted); margin:2px 0 6px; }
+.live .msg .x { white-space:pre-wrap; font-size:14px; max-height:220px; overflow:auto; word-break:break-word; }
+.live .count { font-size:12px; color:var(--muted); } .live .count.over { color:#b42318; font-weight:600; }
+.live .warn { background:#fff1d6; color:#7a4b00; border-radius:6px; padding:6px 10px; font-size:13px; margin-top:6px; }
+.live details { margin-top:12px; } .live summary { cursor:pointer; color:var(--muted); font-size:13px; }
+.live pre { font-size:12px; max-height:260px; }

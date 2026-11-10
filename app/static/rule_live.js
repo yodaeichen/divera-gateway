@@ -1,0 +1,98 @@
+// Live-Ansicht der Regel: schickt die aktuellen Formularwerte an /rules/preview und zeigt das Ergebnis.
+// Es wird dabei nichts gespeichert und nichts an DIVERA gesendet.
+(function () {
+  var form = document.getElementById('rule-form');
+  var out = document.getElementById('live');
+  if (!form || !out || !window.fetch) return;
+  var fallback = document.getElementById('static-result');
+  if (fallback) fallback.style.display = 'none';
+  var timer = null, seq = 0;
+
+  function esc(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function ph(name) { return '<code>{' + esc(name) + '}</code>'; }
+
+  function render(d) {
+    var h = '<h2>Live-Ansicht</h2>';
+    if (d.state === 'nosample') {
+      out.innerHTML = h + '<p>Trage unten eine Beispielnachricht ein (oder übernimm eine über „Verbindung testen" bei der Quelle). ' +
+        'Dann siehst du hier bei jeder Änderung sofort, was an DIVERA gehen würde.</p>';
+      return;
+    }
+    h += '<div class="state ' + (d.match ? 'ok' : '') + '">' +
+      (d.match ? 'Regel greift bei der Beispielnachricht' : 'Regel greift nicht bei der Beispielnachricht') + '</div>';
+    if (d.form_error) h += '<div class="warn">' + esc(d.form_error) + '</div>';
+    if (!d.active) h += '<div class="warn">Die Regel ist nicht aktiv und wird im Betrieb übersprungen.</div>';
+
+    h += '<h3>Bedingungen</h3><ul>';
+    if (!d.conditions.length) h += '<li>Keine Bedingung gesetzt: die Regel greift bei jeder Nachricht der Quelle.</li>';
+    d.conditions.forEach(function (c) {
+      h += '<li class="' + (c.ok ? 'yes' : 'no') + '">' + esc(c.label) + ' enthält „' + esc(c.needle) + '“</li>';
+    });
+    h += '</ul>';
+
+    if (d.expressions.length) {
+      h += '<h3>Ausdrücke' + (d.require_regex ? ' (alle müssen etwas finden)' : '') + '</h3><ul>';
+      d.expressions.forEach(function (e, i) {
+        var names = Object.keys(e.groups);
+        var text = 'Zeile ' + (i + 1) + ': ';
+        if (e.error) text += 'fehlerhaft (' + esc(e.error) + ')';
+        else if (!e.ok) text += 'nichts gefunden';
+        else if (!names.length) text += 'gefunden, aber ohne benannte Gruppe';
+        else text += names.map(function (n) { return ph(n) + ' = ' + esc(e.groups[n]); }).join(', ');
+        h += '<li class="' + (e.ok ? 'yes' : 'no') + '">' + text + '</li>';
+      });
+      h += '</ul>';
+    }
+
+    var f = {};
+    d.fields.forEach(function (x) { f[x.key] = x; });
+    function count(x) {
+      return '<span class="count ' + (x.length > x.limit ? 'over' : '') + '">' + x.length + ' / ' + x.limit + ' Zeichen' +
+        (x.length > x.limit ? ', wird abgeschnitten' : '') + '</span>';
+    }
+    h += '<h3>So geht es an DIVERA' + (d.match ? '' : ' (wenn die Regel greifen würde)') + '</h3>';
+    h += '<div class="msg ' + (d.kind === 'news' ? 'news ' : '') + (d.match ? '' : 'off') + '">' +
+      '<div class="count">' + (d.kind === 'news' ? 'Mitteilung (leise)' : 'Alarm') + (d.priority ? ' · Sonderrechte' : '') + '</div>' +
+      '<div class="t">' + (esc(f.title.value) || '<em>kein Stichwort</em>') + '</div>' +
+      '<div class="a">' + (esc(f.address.value) || '<em>keine Adresse</em>') + '</div>' +
+      '<div class="x">' + (esc(f.text.value) || '<em>kein Text</em>') + '</div></div>';
+    h += '<ul><li>Stichwort: ' + count(f.title) + '</li><li>Text: ' + count(f.text) + '</li>' +
+      (f.address.length ? '<li>Adresse: ' + count(f.address) + '</li>' : '') +
+      '<li>Empfänger (RIC): ' + (d.payload.ric ? esc(d.payload.ric) : '<em>keiner eingetragen</em>') + '</li></ul>';
+
+    if (!f.title.value) h += '<div class="warn">Das Stichwort ist leer.</div>';
+    if (!d.payload.ric && !/(^|\n)\s*(group_ids|cluster_ids|vehicle|vehicle_ids|person|user_cluster_relation_ids|ucr|alarmcode_id)\s*=/.test(form.elements.extra_params.value))
+      h += '<div class="warn">Kein Empfänger angegeben. Trage eine RIC ein oder setze z. B. <code>group_ids</code> bei den weiteren Parametern.</div>';
+    if (d.unknown.length) h += '<div class="warn">Unbekannte Platzhalter (bleiben leer): ' + d.unknown.map(ph).join(', ') + '</div>';
+    if (d.empty.length) h += '<div class="warn">Platzhalter ohne Inhalt bei dieser Nachricht: ' + d.empty.map(ph).join(', ') + '</div>';
+
+    var names = Object.keys(d.placeholders);
+    h += '<details><summary>Verfügbare Platzhalter (' + (names.length + 1) + ')</summary><ul>' +
+      names.map(function (n) { return '<li>' + ph(n) + ' = ' + esc(d.placeholders[n]) + '</li>'; }).join('') +
+      '<li>' + ph('body') + ' = ganzer Text</li></ul></details>';
+    h += '<details><summary>Daten an die DIVERA-API</summary><pre>' + esc(JSON.stringify(d.payload, null, 2)) + '</pre></details>';
+    h += '<p class="hint">Es wird nichts gespeichert und nichts gesendet.</p>';
+    out.innerHTML = h;
+  }
+
+  function update() {
+    var mine = ++seq;
+    fetch('/rules/preview', { method: 'POST', body: new FormData(form), credentials: 'same-origin' })
+      .then(function (resp) {
+        if (!resp.ok || (resp.headers.get('content-type') || '').indexOf('json') < 0) throw new Error('status ' + resp.status);
+        return resp.json();
+      })
+      .then(function (data) { if (mine === seq) render(data); })
+      .catch(function () {
+        if (mine === seq) out.innerHTML = '<h2>Live-Ansicht</h2><div class="warn">Keine Antwort vom Server. Vielleicht ist die Anmeldung abgelaufen: Seite neu laden.</div>';
+      });
+  }
+  function schedule() { clearTimeout(timer); timer = setTimeout(update, 250); }
+  form.addEventListener('input', schedule);
+  form.addEventListener('change', schedule);
+  update();
+})();
