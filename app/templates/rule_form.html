@@ -111,8 +111,8 @@
   <label>Adresse</label><input type="text" name="address_tpl" value="{{ rule.address_tpl if rule else '' }}" placeholder="{strasse}, {ort}">
   <p class="hint">Einsatzadresse für Karte und Navigation, höchstens 200 Zeichen. Leer lassen, wenn die Nachricht keine Adresse enthält.</p>
   <label>Weitere API-Parameter (optional, eine Zeile je <code>name=wert</code>)</label>
-  <textarea name="extra_params" spellcheck="false" placeholder="group_ids=12,13&#10;alarmcode_id=5">{{ rule.extra_params if rule else '' }}</textarea>
-  <p class="hint">Zusätzliche Felder der DIVERA-API, z. B. <code>group_ids</code> (Gruppen-IDs), <code>vehicle</code> (Fahrzeuge), <code>alarmcode_id</code> (Alarmvorlage), <code>number</code> (Einsatznummer), <code>lat</code>/<code>lng</code> (Koordinaten). Werte dürfen Platzhalter enthalten.</p>
+  <textarea name="extra_params" spellcheck="false" placeholder="alarmcode_id=5&#10;number={einsatznummer}">{{ rule.extra_params if rule else '' }}</textarea>
+  <p class="hint">Zusätzliche Felder der DIVERA-API, z. B. <code>cluster_ids</code> (Untereinheiten), <code>vehicle</code> (Fahrzeuge), <code>alarmcode_id</code> (Alarmvorlage), <code>number</code> (Einsatznummer), <code>lat</code>/<code>lng</code> (Koordinaten). Werte dürfen Platzhalter enthalten.</p>
   <label class="check"><input type="checkbox" name="priority" {{ 'checked' if rule and rule.priority }}> Sonderrechte / Priorität</label>
   <p class="hint">Kennzeichnet den Einsatz in DIVERA als Einsatz mit Sonderrechten.</p>
   <label class="check"><input type="checkbox" name="stop" {{ 'checked' if not rule or rule.stop }}> Nach dieser Regel keine weiteren Regeln prüfen</label>

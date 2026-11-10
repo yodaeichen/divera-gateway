@@ -14,6 +14,8 @@ from . import security as sec
 log = logging.getLogger("gateway.rules")
 DIVERA_API_URL = os.environ.get("DIVERA_API_URL", "https://app.divera247.com/api/alarm")
 DIVERA_PULL_URL = os.environ.get("DIVERA_PULL_URL", "https://app.divera247.com/api/v2/pull/all")
+# Laut DIVERA-Dokumentation vom Typ "Integer-Array": werden als Liste übertragen, nicht als Text mit Kommas.
+ARRAY_KEYS = ("group_ids", "cluster_ids", "user_cluster_relation_ids", "ucr", "vehicle_ids")
 RECIPIENT_KEYS = ("ric", "group_ids", "user_cluster_relation_ids", "ucr", "cluster_ids", "vehicle", "vehicle_ids", "person", "alarmcode_id")
 LIMITS = {"title": 50, "text": 1000, "address": 200}
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
@@ -162,18 +164,26 @@ def build_payload(rule: m.Rule, values: dict) -> dict:
     if rule.ric.strip():
         payload["ric"] = render(rule.ric, values)
     if id_list(rule.ucr_ids):
-        payload["user_cluster_relation_ids"] = ",".join(id_list(rule.ucr_ids))
+        # Zwei dokumentierte Wege zugleich: die ID-Liste und "person" (nimmt laut Doku Fremdschlüssel oder IDs, mit Komma)
+        payload["user_cluster_relation_ids"] = id_list(rule.ucr_ids)
+        payload["person"] = ",".join(id_list(rule.ucr_ids))
     if id_list(rule.group_ids):
-        payload["group_ids"] = ",".join(id_list(rule.group_ids))
+        payload["group_ids"] = id_list(rule.group_ids)
     if rule.priority:
         payload["priority"] = "1"
     if rule.kind == "news":
         payload["news"] = "1"
     for line in (rule.extra_params or "").splitlines():
         key, sep, value = line.partition("=")
-        if sep and key.strip() and key.strip() != "accesskey":
-            payload[key.strip()] = render(value, values)
+        key = key.strip()
+        if sep and key and key != "accesskey":
+            payload[key] = id_list(render(value, values)) if key in ARRAY_KEYS else render(value, values)
     return payload
+
+
+def encode_payload(payload: dict) -> dict:
+    """Formulardaten für DIVERA: Listen gehen als wiederholtes name[]=wert, so entsteht dort ein Array."""
+    return {(f"{key}[]" if isinstance(value, list) else key): value for key, value in payload.items()}
 
 
 def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
@@ -182,7 +192,7 @@ def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
     error = ""
     for attempt in range(3):
         try:
-            resp = httpx.post(DIVERA_API_URL, params={"accesskey": accesskey}, data=payload, timeout=15)
+            resp = httpx.post(DIVERA_API_URL, params={"accesskey": accesskey}, data=encode_payload(payload), timeout=15)
             body = resp.text[:300]
             ok = resp.status_code == 200
             try:

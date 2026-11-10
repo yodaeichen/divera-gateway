@@ -144,7 +144,7 @@ with TestClient(app, base_url="http://testserver") as c:
         rule = db.get(m.Rule, 1)
         p = rules.build_payload(rule, rules.match_rule(rule, {"from": "a", "subject": "Alarm", "body": body}))
         assert p == {"title": "B2 Wohnungsbrand", "text": "Alarm von a", "address": "Musterstraße 1, Musterstadt",
-                     "ric": "LZ1", "priority": "1", "group_ids": "1,2"}, p
+                     "ric": "LZ1", "priority": "1", "group_ids": ["1", "2"]}, p
         # doppelte Nachricht wird nur einmal verarbeitet, veraltete gar nicht
         import datetime as dt
         webhook_src = db.get(m.Source, 2)
@@ -202,7 +202,24 @@ with TestClient(app, base_url="http://testserver") as c:
     assert 'name="ucr" value="501"' in edit and "Muster, Max" in edit and 'name="grp" value="12"' in edit
     PICK = dict(RULE, ric="", extra_params="", ucr=["501", "999", "boese"], grp=["12"], t_subject="Alarm", t_body=body)
     live3 = c.post("/rules/preview", data=PICK).json()
-    assert live3["payload"]["user_cluster_relation_ids"] == "501,999" and live3["payload"]["group_ids"] == "12" and "ric" not in live3["payload"]
+    assert live3["payload"]["user_cluster_relation_ids"] == ["501", "999"] and live3["payload"]["person"] == "501,999"
+    assert live3["payload"]["group_ids"] == ["12"] and "ric" not in live3["payload"]
+    # Übertragung: Listen als name[]=wert, damit bei DIVERA ein Array ankommt
+    import httpx as _httpx
+    wire = {}
+    class _Resp:
+        status_code, text = 200, '{"success":true}'
+        def json(self): return {"success": True}
+    def _post(url, params=None, data=None, timeout=None):
+        wire.update(body=bytes(_httpx.Request("POST", url, data=data).read()).decode(), params=params); return _Resp()
+    real_post, rules.httpx.post = rules.httpx.post, _post
+    assert rules.send_divera("k", live3["payload"])[0]
+    rules.httpx.post = real_post
+    from urllib.parse import parse_qsl
+    sent_pairs = parse_qsl(wire["body"])
+    assert ("user_cluster_relation_ids[]", "501") in sent_pairs and ("user_cluster_relation_ids[]", "999") in sent_pairs, sent_pairs
+    assert ("group_ids[]", "12") in sent_pairs and ("person", "501,999") in sent_pairs and ("title", "B2 Wohnungsbrand") in sent_pairs
+    assert wire["params"] == {"accesskey": "k"} and "accesskey" not in wire["body"]
     assert live3["persons"] == ["Muster, Max", "ID 999"] and live3["groups"] == ["Löschzug 1"] and live3["has_recipient"]
     assert not c.post("/rules/preview", data=dict(RULE, ric="", extra_params="", t_subject="Alarm", t_body=body)).json()["has_recipient"]
     saved = c.post("/rules/save", data=PICK).text
