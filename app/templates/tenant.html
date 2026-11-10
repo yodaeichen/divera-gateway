@@ -4,10 +4,26 @@
   <h1>{{ tenant.name }}
     {% if not tenant.active %}<span class="tag">inaktiv</span>{% elif tenant.test_mode %}<span class="tag test">Testmodus</span>{% else %}<span class="tag gesendet">scharf</span>{% endif %}</h1>
   <div><form class="inline" method="post" action="/tenants/{{ tenant.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light" {{ 'disabled' if not tenant.active }}>Jetzt abrufen</button></form>
+  <form class="inline" method="post" action="/tenants/{{ tenant.id }}/keycheck"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Schlüssel prüfen</button></form>
   <a class="btn light" href="/tenants/{{ tenant.id }}/edit">Kunde bearbeiten</a></div>
 </div>
 {% if not tenant.accesskey_enc %}<div class="flash err">Es ist noch kein DIVERA-Accesskey hinterlegt.</div>{% endif %}
 {% if not tenant.accesskey_user_enc and tenant.rules|selectattr('kind', 'equalto', 'news')|selectattr('ric', 'equalto', '')|list %}<div class="flash err">Mindestens eine Mitteilungs-Regel nutzt die neuere DIVERA-Schnittstelle (ohne Push oder mit angekreuzten Empfängern). Dafür fehlt der persönliche Accesskey: „Kunde bearbeiten" öffnen und eintragen.</div>{% endif %}
+
+{% if checks %}
+<div class="card">
+  <h2>Schlüsselprüfung</h2>
+  <table>
+  <tr><th>Schlüssel</th><th>Lesezugriff auf die v2-Schnittstelle</th><th>Was DIVERA dazu sagt</th></tr>
+  {% for c in checks %}
+  <tr><td><strong>{{ c.label }}</strong>{% if not c.missing %}<br><span class="hint">{{ c.length }} Zeichen{{ ', enthält Leerzeichen am Rand!' if c.spaces }}</span>{% endif %}</td>
+    {% if c.missing %}<td colspan="2"><span class="tag">nicht hinterlegt</span></td>
+    {% else %}<td><span class="tag {{ 'gesendet' if c.ok else 'fehler' }}">{{ 'angenommen' if c.ok else 'abgelehnt' }} (HTTP {{ c.status }})</span></td><td class="detail">{{ c.info }}</td>{% endif %}</tr>
+  {% endfor %}
+  </table>
+  <p class="hint">Die Prüfung liest nur und ändert nichts in DIVERA. Wird der persönliche Schlüssel hier angenommen, das Senden einer Mitteilung aber abgelehnt, fehlt dem Benutzer das Recht, Mitteilungen zu erstellen. Wird er schon hier abgelehnt, ist es nicht der richtige Schlüssel.</p>
+</div>
+{% endif %}
 
 <div class="card">
   <div class="row"><h2>Quellen</h2>

@@ -240,9 +240,25 @@ with TestClient(app, base_url="http://testserver") as c:
         def json(self): return {"name": "Forbidden"}
     rules.httpx.post = lambda *a, **k: _R403()
     ok403, det403 = rules.send_divera("k", one["payload"])
-    assert not ok403 and "persönlichen Accesskey" in det403
-    assert "persönlichen Accesskey" not in rules.send_divera("k", {"title": "x"})[1], "Hinweis nur für v2"
+    assert not ok403 and det403.startswith("HTTP 403")
+    with m.SessionLocal() as db:
+        t1 = db.get(m.Tenant, 1)
+        assert "weil kein persönlicher Accesskey hinterlegt ist" in rules.refusal_hint(t1, one["payload"], det403)
+        assert rules.refusal_hint(t1, {"title": "x"}, det403) == "" and rules.refusal_hint(t1, one["payload"], "HTTP 200: ok") == ""
+        t1.accesskey_user_enc = "x"
+        assert "trotzdem abgelehnt" in rules.refusal_hint(t1, one["payload"], det403)
     rules.httpx.post = keep_post
+    # Schlüsselprüfung
+    class _G:
+        def __init__(self, code, data): self.status_code, self._d, self.text = code, data, "x"
+        def json(self): return self._d
+    keep_get = rules.httpx.get
+    rules.httpx.get = lambda url, params=None, timeout=None: (_G(200, {"success": True, "data": {"user": {"firstname": "Gate", "lastname": "Way"}, "cluster": {"consumer": {"1": {}, "2": {}}}}})
+                                                                if params["accesskey"] == "geheim123" else _G(403, {"message": "Nicht autorisiert"}))
+    kc = c.post("/tenants/1/keycheck", data={"csrf": tok}).text
+    assert "angenommen (HTTP 200)" in kc and "Benutzer: Gate Way, 2 Personen sichtbar" in kc and "nicht hinterlegt" in kc and "geheim123" not in kc
+    assert rules.check_key("falsch") == {"status": 403, "ok": False, "info": "Nicht autorisiert"}
+    rules.httpx.get = keep_get
     used = []
     rules.send_divera = lambda key, payload: used.append(key) or (True, "ok")
     c.post("/rules/send-test", data=dict(NEWS, ric="", ucr=["501"], push="0", confirm="ja"))

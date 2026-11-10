@@ -250,8 +250,36 @@ def key_for(tenant: m.Tenant, payload: dict | None = None) -> str:
     return sec.decrypt(tenant.accesskey_enc)
 
 
-V2_FORBIDDEN_HINT = (" Hinweis: Die v2-Schnittstelle hat den Accesskey abgelehnt. Sie verlangt den persönlichen Accesskey eines "
-                     "DIVERA-Benutzers, der Mitteilungen schreiben darf. Trage ihn beim Kunden unter „Persönlicher Accesskey“ ein.")
+def refusal_hint(tenant: m.Tenant, payload: dict, detail: str) -> str:
+    """Erklärt eine Ablehnung (401/403) der v2-Schnittstelle, je nachdem welcher Schlüssel benutzt wurde."""
+    if "News" not in payload or not re.match(r"HTTP 40[13]\b", detail):
+        return ""
+    if tenant.accesskey_user_enc:
+        return (" Hinweis: Gesendet wurde mit dem persönlichen Accesskey, DIVERA hat ihn trotzdem abgelehnt. Entweder ist es nicht der "
+                "persönliche Schlüssel dieses Benutzers, oder der Benutzer darf keine Mitteilungen erstellen. "
+                "„Schlüssel prüfen“ beim Kunden zeigt, welcher Fall vorliegt.")
+    return (" Hinweis: Gesendet wurde mit dem Alarm-Accesskey der Einheit, weil kein persönlicher Accesskey hinterlegt ist. Die "
+            "v2-Schnittstelle verlangt den persönlichen Accesskey eines Benutzers, der Mitteilungen schreiben darf: beim Kunden eintragen.")
+
+
+def check_key(accesskey: str) -> dict:
+    """Prüft einen Schlüssel lesend gegen die v2-Schnittstelle (ändert nichts in DIVERA)."""
+    try:
+        resp = httpx.get(DIVERA_PULL_URL, params={"accesskey": accesskey}, timeout=20)
+    except httpx.HTTPError as exc:
+        return {"status": 0, "ok": False, "info": f"Netzwerkfehler: {type(exc).__name__}"}
+    info = ""
+    try:
+        data = resp.json()
+        body = data.get("data") or {}
+        user = body.get("user") or {}
+        name = " ".join(str(x) for x in (user.get("firstname"), user.get("lastname")) if x)
+        cluster = (body.get("cluster") or {})
+        parts = [f"Benutzer: {name}" if name else "", f"{len(cluster.get('consumer') or [])} Personen sichtbar" if cluster else ""]
+        info = ", ".join(p for p in parts if p) or str(data.get("message", ""))[:120]
+    except (ValueError, AttributeError):
+        info = resp.text[:120]
+    return {"status": resp.status_code, "ok": resp.status_code == 200, "info": info}
 
 
 def encode_payload(payload: dict) -> dict:
@@ -277,8 +305,7 @@ def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
             except (ValueError, AttributeError):
                 pass
             if ok or resp.status_code < 500:
-                hint = V2_FORBIDDEN_HINT if "News" in payload and resp.status_code in (401, 403) else ""
-                return ok, f"HTTP {resp.status_code}: {body}{hint}"
+                return ok, f"HTTP {resp.status_code}: {body}"
             error = f"HTTP {resp.status_code}: {body}"
         except httpx.HTTPError as exc:
             error = f"Netzwerkfehler: {type(exc).__name__}"
@@ -313,6 +340,7 @@ def process_message(db, source: m.Source, msg: dict) -> int:
             status, detail = "test", "Testmodus, nicht gesendet: " + json.dumps(payload, ensure_ascii=False)
         else:
             ok, detail = send_divera(key_for(tenant, payload), payload)
+            detail += refusal_hint(tenant, payload, detail)
             status = "gesendet" if ok else "fehler"
             detail = f"{title_of(payload)} | {detail}"
         db.add(m.Log(**common, rule_name=rule.name, status=status, detail=detail[:2000]))

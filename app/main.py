@@ -225,6 +225,24 @@ async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.U
     return go(f"/tenants/{tenant.id}")
 
 
+@app.post("/tenants/{tid}/keycheck")
+async def tenant_keycheck(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    """Prüft beide hinterlegten Schlüssel lesend gegen DIVERA und zeigt, was sie dürfen."""
+    await read_form(request)
+    tenant = need(db.get(m.Tenant, tid))
+    checks = []
+    for label, enc in (("Alarm-Accesskey der Einheit", tenant.accesskey_enc), ("Persönlicher Accesskey", tenant.accesskey_user_enc)):
+        if not enc:
+            checks.append({"label": label, "missing": True})
+            continue
+        key = sec.decrypt(enc)
+        result = await asyncio.to_thread(rules.check_key, key)
+        result.update(label=label, missing=False, length=len(key), spaces=key != key.strip())
+        checks.append(result)
+    return page(request, "tenant.html", user, tenant=tenant, base_url=str(request.base_url), directory=directory_of(tenant),
+                since={}, checks=checks)
+
+
 @app.post("/tenants/{tid}/directory")
 async def tenant_directory(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     """Lädt Personen und Gruppen der Einheit aus DIVERA für die Empfängerauswahl in Regeln."""
@@ -543,6 +561,7 @@ async def rule_send_test(request: Request, db: Session = Depends(get_db), user: 
         return page(request, "rule_send_confirm.html", user, tenant=tenant, rule=rule, data=data, fields=fields,
                     persons=names("persons", rule.ucr_ids), groups=names("groups", rule.group_ids))
     ok, detail = await asyncio.to_thread(rules.send_divera, rules.key_for(tenant, data["payload"]), data["payload"])
+    detail += rules.refusal_hint(tenant, data["payload"], detail)
     db.add(m.Log(tenant_id=tenant.id, tenant_name=tenant.name, source_name="Testsendung von Hand", rule_name=rule.name,
                  sender=sample["from"][:200], subject=sample["subject"][:300], status="gesendet" if ok else "fehler",
                  detail=f"{rules.title_of(data['payload'])} | {detail} | ausgelöst von {user.username}"[:2000]))
