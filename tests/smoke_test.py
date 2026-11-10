@@ -25,6 +25,8 @@ def csrf(html: str) -> str:
 with TestClient(app, base_url="http://testserver") as c:
     assert c.get("/", follow_redirects=False).status_code == 303, "ohne Anmeldung muss umgeleitet werden"
     tok = csrf(c.get("/login").text)
+    first = c.get("/login").text
+    assert "powered by yodaeichen" in first and "https://github.com/sponsors/yodaeichen" in first and "<iframe" not in first
     assert "falsch" in c.post("/login", data={"csrf": tok, "username": "admin", "password": "nein"}).text
     tok = csrf(c.get("/login").text)
     assert c.post("/login", data={"username": "admin", "password": "test-passwort-123"}).status_code == 403, "CSRF"

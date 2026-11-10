@@ -55,3 +55,15 @@ h2.step { margin-top:26px; padding-top:16px; border-top:1px solid var(--line); }
 button:disabled { opacity:.5; cursor:not-allowed; }
 .picklist { border:1px solid #c4cad4; border-radius:6px; padding:6px 10px; max-height:190px; overflow:auto; background:#fff; }
 .picklist label.check { margin:3px 0; } .pickfilter { margin-bottom:6px; }
+
+/* Marke, Sponsor-Link und Fußzeile */
+header a.brand { display:flex; flex-direction:column; line-height:1.15; color:#fff; text-decoration:none; font-weight:700; letter-spacing:.3px; }
+header a.brand > span { display:inline; } header a.brand { display:block; }
+.brand small, .loginbrand small { display:block; font-size:10.5px; font-weight:400; letter-spacing:.6px; color:#9aa4b5; margin-top:1px; }
+.loginbrand span { color:var(--accent); } .loginbrand small { color:var(--muted); font-size:12px; margin-top:2px; }
+a.sponsor { display:inline-flex; align-items:center; gap:6px; text-decoration:none; }
+header a.sponsor { border:1px solid #556; border-radius:6px; padding:4px 10px; color:#d5dae3; font-size:14px; }
+header a.sponsor:hover { border-color:#db61a2; color:#fff; }
+.heart { color:#db61a2; }
+footer { max-width:1280px; margin:8px auto 28px; padding:0 20px; color:var(--muted); font-size:13px; text-align:center; }
+footer a { color:var(--muted); } footer a:hover { color:var(--ink); } footer a.sponsor:hover .heart { color:#bf3989; }
