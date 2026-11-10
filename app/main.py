@@ -508,6 +508,42 @@ async def rule_preview(request: Request, db: Session = Depends(get_db), user: m.
     return JSONResponse(data)
 
 
+@app.post("/rules/send-test")
+async def rule_send_test(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    """Sendet das Ergebnis der Regel für die Beispielnachricht wirklich an DIVERA, auch im Testmodus.
+
+    Zwei Schritte: erst eine Bestätigungsseite mit genau dem, was gesendet würde, dann das Senden.
+    """
+    form = await read_form(request)
+    rule = unsaved_rule(form, db)
+    error = apply_rule_form(rule, form, db)
+    sample = read_sample(form)
+    tenant = need(db.get(m.Tenant, rule.tenant_id))
+    if not error and not sample:
+        error = "Zum Senden bitte unten eine Beispielnachricht eintragen."
+    if not error and not tenant.accesskey_enc:
+        error = "Für diesen Kunden ist kein DIVERA-Accesskey hinterlegt."
+    data = rules.preview(rule, sample) if sample and not error else None
+    if data and not data["match"]:
+        error = "Die Regel greift bei der Beispielnachricht nicht, deshalb würde auch im Betrieb nichts gesendet."
+    if error:
+        return rule_page(request, user, tenant, rule, sample=sample, result=evaluate(rule, sample) if sample else None, error=error)
+    directory = directory_of(tenant)
+    def names(kind: str, ids: str) -> list[str]:
+        lookup = {str(entry["id"]): entry["name"] for entry in directory[kind]}
+        return [lookup.get(i, f"ID {i}") for i in rules.id_list(ids)]
+    if form.get("confirm") != "ja":
+        fields = [(k, v) for k, v in form.multi_items() if k not in ("csrf", "confirm") and isinstance(v, str)]
+        return page(request, "rule_send_confirm.html", user, tenant=tenant, rule=rule, data=data, fields=fields,
+                    persons=names("persons", rule.ucr_ids), groups=names("groups", rule.group_ids))
+    ok, detail = await asyncio.to_thread(rules.send_divera, sec.decrypt(tenant.accesskey_enc), data["payload"])
+    db.add(m.Log(tenant_id=tenant.id, tenant_name=tenant.name, source_name="Testsendung von Hand", rule_name=rule.name,
+                 sender=sample["from"][:200], subject=sample["subject"][:300], status="gesendet" if ok else "fehler",
+                 detail=f"{data['payload'].get('title', '')} | {detail} | ausgelöst von {user.username}"[:2000]))
+    db.commit()
+    return rule_page(request, user, tenant, rule, sample=sample, result=evaluate(rule, sample), send_result={"ok": ok, "detail": detail})
+
+
 @app.post("/rules/save")
 async def rule_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     form = await read_form(request)

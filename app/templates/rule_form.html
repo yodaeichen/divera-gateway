@@ -5,6 +5,9 @@
 
 {% if error %}<div class="flash err">{{ error }} Es wurde nichts gespeichert.</div>{% endif %}
 {% if just_saved %}<div class="flash">Regel gespeichert.</div>{% endif %}
+{% if send_result %}
+<div class="flash {{ '' if send_result.ok else 'err' }}"><strong>{{ 'An DIVERA gesendet.' if send_result.ok else 'Senden fehlgeschlagen.' }}</strong> Antwort von DIVERA: {{ send_result.detail }}</div>
+{% endif %}
 {% if notes %}
 <div class="card">
   <h2>Vorschlag aus der Beispielnachricht</h2>
@@ -129,8 +132,10 @@
   <div class="actions">
     <button class="light" formaction="/rules/test">Prüfen ohne Speichern</button>
     <button>Speichern</button>
+    <button class="light" formaction="/rules/send-test">Testweise an DIVERA senden …</button>
     <a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zum Kunden</a>
   </div>
+  <p class="hint">„Testweise an DIVERA senden" überträgt das Ergebnis für die Beispielnachricht wirklich, auch im Testmodus. Vorher erscheint eine Seite zur Bestätigung.</p>
 </div>
 </form>
 <aside id="live" class="card live"><h2>Live-Ansicht</h2><p class="hint">Wird geladen. Ohne JavaScript bitte „Prüfen ohne Speichern" verwenden.</p></aside>

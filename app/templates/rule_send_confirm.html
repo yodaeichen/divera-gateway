@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Wirklich an DIVERA senden? <span class="hint">({{ tenant.name }})</span></h1>
+<div class="card">
+  {% if data.kind != 'news' %}
+  <div class="flash err"><strong>Achtung, echter Alarm:</strong> Die Empfänger werden mit Alarmton alarmiert. Wenn du nur die Übertragung prüfen willst, geh zurück und stelle die Art auf „Mitteilung (leise)".</div>
+  {% else %}
+  <div class="flash">Es wird eine Mitteilung (leise) gesendet, keine Alarmierung.</div>
+  {% endif %}
+  {% if not data.has_recipient %}<div class="flash err"><strong>Kein Empfänger angegeben.</strong> An wen DIVERA dann zustellt, hängt von den Einstellungen der Einheit ab. Im Zweifel zurückgehen und nur dich selbst ankreuzen.</div>{% endif %}
+  <p>Das wird jetzt sofort und unabhängig vom Testmodus an DIVERA übertragen:</p>
+  <div class="live"><div class="msg {{ 'news' if data.kind == 'news' }}">
+    <div class="count">{{ 'Mitteilung (leise)' if data.kind == 'news' else 'Alarm' }}{{ ' · Sonderrechte' if data.priority }}</div>
+    {% for f in data.fields %}<div class="{{ {'title': 't', 'address': 'a', 'text': 'x'}[f.key] }}">{{ f.value or ('kein Stichwort' if f.key == 'title' else '') }}</div>{% endfor %}
+  </div></div>
+  <table style="margin-top:14px">
+    <tr><th>Empfänger (RIC)</th><td>{{ data.payload.ric or 'keine' }}</td></tr>
+    <tr><th>Gruppen</th><td>{{ groups|join(', ') or 'keine' }}</td></tr>
+    <tr><th>Personen</th><td>{{ persons|join(', ') or 'keine' }}</td></tr>
+  </table>
+  <details style="margin-top:12px"><summary>Daten an die DIVERA-API</summary><pre>{{ data.payload|tojson(indent=2) }}</pre></details>
+  <form method="post" style="margin-top:18px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for k, v in fields %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <div class="actions">
+      <button name="confirm" value="ja" formaction="/rules/send-test">Ja, jetzt an DIVERA senden</button>
+      <button class="light" formaction="/rules/test">Abbrechen und zurück zur Regel</button>
+    </div>
+  </form>
+  <p class="hint">Die Regel wird dabei nicht gespeichert. Die Sendung erscheint im Protokoll als „Testsendung von Hand".</p>
+</div>
+{% endblock %}

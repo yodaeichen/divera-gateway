@@ -158,6 +158,28 @@ with TestClient(app, base_url="http://testserver") as c:
     askind = c.post("/rules/preview", data=dict(RULE, kind="alarm", t_subject="Alarm", t_body=body)).json()
     assert askind["kind"] == "alarm" and "news" not in askind["payload"]
 
+    # Testsendung von Hand: erst bestätigen, dann wirklich senden (auch im Testmodus)
+    sent = []
+    real_send = rules.send_divera
+    rules.send_divera = lambda key, payload: sent.append((key, payload)) or (True, 'HTTP 200: {"success":true}')
+    SEND = dict(RULE, name="NICHT SPEICHERN", t_subject="Alarm", t_body=body)
+    ask = c.post("/rules/send-test", data=SEND)
+    assert "Wirklich an DIVERA senden?" in ask.text and "Achtung, echter Alarm" in ask.text and "B2 Wohnungsbrand" in ask.text and not sent
+    assert 'name="title_tpl" value="{stichwort}"' in ask.text and 'name="confirm" value="ja"' in ask.text
+    assert "Mitteilung (leise) gesendet" in c.post("/rules/send-test", data=dict(SEND, kind="news")).text
+    assert "Kein Empfänger angegeben" in c.post("/rules/send-test", data=dict(SEND, ric="", extra_params="")).text and not sent
+    assert "greift bei der Beispielnachricht nicht" in c.post("/rules/send-test", data=dict(SEND, t_subject="Info", confirm="ja")).text and not sent
+    assert "Beispielnachricht eintragen" in c.post("/rules/send-test", data={k: v for k, v in RULE.items() if k != "t_from"} | {"confirm": "ja"}).text and not sent
+    done = c.post("/rules/send-test", data=dict(SEND, confirm="ja"))
+    assert "An DIVERA gesendet." in done.text and len(sent) == 1 and sent[0][0] == "geheim123"
+    assert sent[0][1]["title"] == "B2 Wohnungsbrand" and sent[0][1]["ric"] == "LZ1" and "news" not in sent[0][1]
+    assert "Testsendung von Hand" in c.get("/logs").text and "ausgelöst von admin" in c.get("/logs").text
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, 1).name == "Brand", "Testsendung darf die Regel nicht speichern"
+    rules.send_divera = lambda key, payload: (False, "HTTP 403: Zugriff verweigert")
+    assert "Senden fehlgeschlagen" in c.post("/rules/send-test", data=dict(SEND, confirm="ja")).text
+    rules.send_divera = real_send
+
     # Empfänger aus DIVERA: Personen und Gruppen ankreuzen
     sample_pull = {"success": True, "data": {"cluster": {
         "consumer": {"501": {"firstname": "Max", "lastname": "Muster", "stdformat_name": "Muster, Max"}, "502": {"firstname": "Erika", "lastname": "Beispiel"}, "x": "kaputt"},
