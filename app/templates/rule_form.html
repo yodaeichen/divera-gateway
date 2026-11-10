@@ -90,6 +90,9 @@
     <div><label>Empfänger (RIC)</label><input type="text" name="ric" value="{{ rule.ric if rule else '' }}" placeholder="LZ1,LZ2">
       <p class="hint">Alarmierungs-RIC der Gruppen, genau wie in DIVERA hinterlegt. Mehrere mit Komma trennen.</p></div>
   </div>
+  <label>Benachrichtigung bei Mitteilungen</label>
+  <select name="push"><option value="1" {{ 'selected' if not rule or rule.push is none or rule.push }}>mit Push</option><option value="0" {{ 'selected' if rule and rule.push is not none and not rule.push }}>ohne Push (nur in der App sichtbar)</option></select>
+  <p class="hint">Gilt nur für die Art „Mitteilung". Ohne Push erscheint die Mitteilung in der App, aber ohne Ton und ohne Hinweis auf dem Sperrbildschirm; auch SMS, Anruf, E-Mail und Pager bleiben aus. Die Empfänger wählst du dann über angekreuzte Gruppen oder Personen, eine RIC wird dabei nicht übertragen.</p>
   {% for kind, field, title, hint in [('groups', 'grp', 'Gruppen', 'Alarmiert alle Mitglieder der angekreuzten Gruppen.'), ('persons', 'ucr', 'Einzelne Personen', 'Alarmiert genau die angekreuzten Personen. Für eine Meldung an nur eine Person: hier eine Person ankreuzen, RIC und Gruppen leer lassen.')] %}
   <label>{{ title }} <span class="count" data-count="{{ field }}"></span></label>
   {% if directory[kind] or stale[kind] %}
@@ -140,5 +143,5 @@
 </form>
 <aside id="live" class="card live"><h2>Live-Ansicht</h2><p class="hint">Wird geladen. Ohne JavaScript bitte „Prüfen ohne Speichern" verwenden.</p></aside>
 </div>
-<script src="/static/rule_live.js?v=8" defer></script>
+<script src="/static/rule_live.js?v=12" defer></script>
 {% endblock %}

@@ -13,6 +13,7 @@ from . import security as sec
 
 log = logging.getLogger("gateway.rules")
 DIVERA_API_URL = os.environ.get("DIVERA_API_URL", "https://app.divera247.com/api/alarm")
+DIVERA_NEWS_URL = os.environ.get("DIVERA_NEWS_URL", "https://app.divera247.com/api/v2/news")
 DIVERA_PULL_URL = os.environ.get("DIVERA_PULL_URL", "https://app.divera247.com/api/v2/pull/all")
 # Laut DIVERA-Dokumentation vom Typ "Integer-Array": werden als Liste übertragen, nicht als Text mit Kommas.
 ARRAY_KEYS = ("group_ids", "cluster_ids", "user_cluster_relation_ids", "ucr", "vehicle_ids")
@@ -84,7 +85,7 @@ def preview(rule: m.Rule, msg: dict) -> dict:
                                           rule.extra_params or ""]))
     result.update(
         fields=fields, payload=(payload := build_payload(rule, values)), kind=rule.kind,
-        has_recipient=any(payload.get(key) for key in RECIPIENT_KEYS), priority=bool(rule.priority),
+        has_recipient="News" in payload or any(payload.get(key) for key in RECIPIENT_KEYS), plan=plan(rule), priority=bool(rule.priority),
         active=bool(rule.active), require_regex=bool(rule.require_regex),
         unknown=sorted({name for name in used if name not in values}),
         empty=sorted({name for name in used if name in values and not values[name]}),
@@ -153,7 +154,68 @@ def fetch_directory(accesskey: str) -> dict:
         raise RuntimeError("DIVERA hat keine lesbare Antwort geliefert.") from None
 
 
+def wants_push(rule: m.Rule) -> bool:
+    return rule.push is None or bool(rule.push)
+
+
+def plan(rule: m.Rule) -> dict:
+    """Legt fest, über welche DIVERA-Schnittstelle eine Regel sendet und wen sie damit erreicht.
+
+    v1 (api/alarm) ist der bisherige Weg mit RIC. v2 (api/v2/news) wird für Mitteilungen genommen, wenn sie ohne Push
+    gehen sollen oder wenn Gruppen bzw. Personen angekreuzt sind und keine RIC eingetragen ist: nur dort lassen sich
+    Push und der Empfängerkreis ausdrücklich festlegen.
+    """
+    persons, groups, ric = id_list(rule.ucr_ids), id_list(rule.group_ids), (rule.ric or "").strip()
+    push = wants_push(rule) or rule.kind != "news"
+    if rule.kind != "news" or (push and (ric or not (persons or groups))):
+        return {"route": "v1", "push": push, "ntype": None, "audience": "", "notes": []}
+    notes = []
+    if persons:
+        ntype, audience = 4, "nur die angekreuzten Personen"
+        if groups:
+            notes.append("Gruppen und Personen sind beide angekreuzt. Bei diesem Übertragungsweg zählen dann nur die Personen.")
+    elif groups:
+        ntype, audience = 3, "nur die angekreuzten Gruppen"
+    else:
+        ntype, audience = 2, "alle Mitglieder der Einheit"
+    if ric:
+        notes.append("Die RIC wird bei „ohne Push“ nicht übertragen. Kreuze stattdessen Gruppen oder Personen an.")
+    if (rule.extra_params or "").strip():
+        notes.append("„Weitere API-Parameter“ werden bei diesem Übertragungsweg nicht mitgeschickt.")
+    return {"route": "v2", "push": push, "ntype": ntype, "audience": audience, "notes": notes}
+
+
+def title_of(payload: dict) -> str:
+    return str((payload.get("News") or payload).get("title", ""))
+
+
+def build_news_v2(rule: m.Rule, values: dict, route: dict) -> dict:
+    """Mitteilung für POST api/v2/news (JSON), Aufbau nach der DIVERA-Dokumentation."""
+    news: dict = {
+        "title": render(rule.title_tpl, values)[:LIMITS["title"]],
+        "text": render(rule.text_tpl, values)[:LIMITS["text"]],
+        "notification_type": route["ntype"],
+        "send_push": route["push"],
+    }
+    address = render(rule.address_tpl, values)[:LIMITS["address"]]
+    if address:
+        news["address"] = address
+    if not route["push"]:  # ausdrücklich still: auch keine SMS, Anrufe, Mails oder Pager
+        news.update(send_sms=False, send_call=False, send_mail=False, send_pager=False)
+    instructions = {}
+    if route["ntype"] == 4:
+        news["user_cluster_relation"] = [int(i) for i in id_list(rule.ucr_ids)]
+        instructions["user_cluster_relation"] = {"mapping": "id"}
+    elif route["ntype"] == 3:
+        news["group"] = [int(i) for i in id_list(rule.group_ids)]
+        instructions["group"] = {"mapping": "id"}
+    return {"News": news, "instructions": instructions}
+
+
 def build_payload(rule: m.Rule, values: dict) -> dict:
+    route = plan(rule)
+    if route["route"] == "v2":
+        return build_news_v2(rule, values, route)
     payload = {
         "title": render(rule.title_tpl, values)[:LIMITS["title"]],
         "text": render(rule.text_tpl, values)[:LIMITS["text"]],
@@ -192,7 +254,10 @@ def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
     error = ""
     for attempt in range(3):
         try:
-            resp = httpx.post(DIVERA_API_URL, params={"accesskey": accesskey}, data=encode_payload(payload), timeout=15)
+            if "News" in payload:  # Mitteilung über die JSON-Schnittstelle v2
+                resp = httpx.post(DIVERA_NEWS_URL, params={"accesskey": accesskey}, json=payload, timeout=15)
+            else:
+                resp = httpx.post(DIVERA_API_URL, params={"accesskey": accesskey}, data=encode_payload(payload), timeout=15)
             body = resp.text[:300]
             ok = resp.status_code == 200
             try:
@@ -237,7 +302,7 @@ def process_message(db, source: m.Source, msg: dict) -> int:
         else:
             ok, detail = send_divera(sec.decrypt(tenant.accesskey_enc), payload)
             status = "gesendet" if ok else "fehler"
-            detail = f"{payload.get('title', '')} | {detail}"
+            detail = f"{title_of(payload)} | {detail}"
         db.add(m.Log(**common, rule_name=rule.name, status=status, detail=detail[:2000]))
         if rule.stop:
             break

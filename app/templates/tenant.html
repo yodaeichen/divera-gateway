@@ -51,7 +51,7 @@
     <td><a href="/rules/{{ r.id }}/edit"><strong>{{ r.name }}</strong></a>{% if not r.active %} <span class="tag">inaktiv</span>{% endif %}</td>
     <td>{{ r.source.name if r.source else 'alle' }}</td>
     <td class="detail">{% if r.match_from %}Absender: {{ r.match_from|replace(';', ' oder ') }}<br>{% endif %}{% if r.match_subject %}Betreff: {{ r.match_subject|replace(';', ' oder ') }}<br>{% endif %}{% if r.match_body %}Text: {{ r.match_body|replace(';', ' oder ') }}<br>{% endif %}{% if r.extract_regex %}mit Ausdrücken{% endif %}</td>
-    <td>{{ 'Mitteilung' if r.kind == 'news' else 'Alarm' }}{% if r.ric %}<br><span class="hint">RIC {{ r.ric }}</span>{% endif %}{% if r.group_ids %}<br><span class="hint">{{ r.group_ids.split(',')|length }} Gruppe(n)</span>{% endif %}{% if r.ucr_ids %}<br><span class="hint">{{ r.ucr_ids.split(',')|length }} Person(en)</span>{% endif %}</td>
+    <td>{{ ('Mitteilung' ~ ('' if r.push is none or r.push else ' ohne Push')) if r.kind == 'news' else 'Alarm' }}{% if r.ric %}<br><span class="hint">RIC {{ r.ric }}</span>{% endif %}{% if r.group_ids %}<br><span class="hint">{{ r.group_ids.split(',')|length }} Gruppe(n)</span>{% endif %}{% if r.ucr_ids %}<br><span class="hint">{{ r.ucr_ids.split(',')|length }} Person(en)</span>{% endif %}</td>
     <td><form class="inline" method="post" action="/rules/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form></td>
   </tr>
   {% else %}<tr><td colspan="6">Noch keine Regel. Ohne Regel wird nichts an DIVERA übergeben.</td></tr>{% endfor %}

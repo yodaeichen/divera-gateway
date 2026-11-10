@@ -59,15 +59,22 @@
     }
     h += '<h3>So geht es an DIVERA' + (d.match ? '' : ' (wenn die Regel greifen würde)') + '</h3>';
     h += '<div class="msg ' + (d.kind === 'news' ? 'news ' : '') + (d.match ? '' : 'off') + '">' +
-      '<div class="count">' + (d.kind === 'news' ? 'Mitteilung (leise)' : 'Alarm') + (d.priority ? ' · Sonderrechte' : '') + '</div>' +
+      '<div class="count">' + (d.kind === 'news' ? 'Mitteilung' + (d.plan.push ? ' (leise)' : ' ohne Push') : 'Alarm') + (d.priority && d.kind !== 'news' ? ' · Sonderrechte' : '') + '</div>' +
       '<div class="t">' + (esc(f.title.value) || '<em>kein Stichwort</em>') + '</div>' +
       '<div class="a">' + (esc(f.address.value) || '<em>keine Adresse</em>') + '</div>' +
       '<div class="x">' + (esc(f.text.value) || '<em>kein Text</em>') + '</div></div>';
     h += '<ul><li>Stichwort: ' + count(f.title) + '</li><li>Text: ' + count(f.text) + '</li>' +
       (f.address.length ? '<li>Adresse: ' + count(f.address) + '</li>' : '') +
-      '<li>Empfänger (RIC): ' + (d.payload.ric ? esc(d.payload.ric) : '<em>keine</em>') + '</li>' +
-      '<li>Gruppen: ' + (d.groups.length ? esc(d.groups.join(', ')) : '<em>keine</em>') + '</li>' +
-      '<li>Personen: ' + (d.persons.length ? esc(d.persons.join(', ')) : '<em>keine</em>') + '</li></ul>';
+      (d.plan.route === 'v2'
+        ? '<li><strong>Geht an: ' + esc(d.plan.audience) + '</strong></li>' +
+          (d.plan.ntype === 3 ? '<li>Gruppen: ' + esc(d.groups.join(', ')) + '</li>' : '') +
+          (d.plan.ntype === 4 ? '<li>Personen: ' + esc(d.persons.join(', ')) + '</li>' : '') +
+          '<li>Push: ' + (d.plan.push ? 'ja' : 'nein') + '</li>'
+        : '<li>Empfänger (RIC): ' + (d.payload.ric ? esc(d.payload.ric) : '<em>keine</em>') + '</li>' +
+          '<li>Gruppen: ' + (d.groups.length ? esc(d.groups.join(', ')) : '<em>keine</em>') + '</li>' +
+          '<li>Personen: ' + (d.persons.length ? esc(d.persons.join(', ')) : '<em>keine</em>') + '</li>') + '</ul>';
+    d.plan.notes.forEach(function (n) { h += '<div class="warn">' + esc(n) + '</div>'; });
+    if (d.plan.route === 'v2' && d.plan.ntype === 2) h += '<div class="warn">Keine Gruppe und keine Person angekreuzt: die Mitteilung geht an alle Mitglieder der Einheit.</div>';
 
     if (d.kind !== 'news') h += '<div class="warn"><strong>Achtung, Alarm:</strong> Diese Regel löst bei den Empfängern einen echten Alarm mit Alarmton aus. Für reine Informationen „Mitteilung (leise)" wählen.</div>';
     if (!f.title.value) h += '<div class="warn">Das Stichwort ist leer.</div>';

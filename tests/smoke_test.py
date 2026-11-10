@@ -166,7 +166,7 @@ with TestClient(app, base_url="http://testserver") as c:
     ask = c.post("/rules/send-test", data=SEND)
     assert "Wirklich an DIVERA senden?" in ask.text and "Achtung, echter Alarm" in ask.text and "B2 Wohnungsbrand" in ask.text and not sent
     assert 'name="title_tpl" value="{stichwort}"' in ask.text and 'name="confirm" value="ja"' in ask.text
-    assert "Mitteilung (leise) gesendet" in c.post("/rules/send-test", data=dict(SEND, kind="news")).text
+    assert "Mitteilung mit Push gesendet" in c.post("/rules/send-test", data=dict(SEND, kind="news")).text
     assert "Kein Empfänger angegeben" in c.post("/rules/send-test", data=dict(SEND, ric="", extra_params="")).text and not sent
     assert "greift bei der Beispielnachricht nicht" in c.post("/rules/send-test", data=dict(SEND, t_subject="Info", confirm="ja")).text and not sent
     assert "Beispielnachricht eintragen" in c.post("/rules/send-test", data={k: v for k, v in RULE.items() if k != "t_from"} | {"confirm": "ja"}).text and not sent
@@ -204,6 +204,46 @@ with TestClient(app, base_url="http://testserver") as c:
     live3 = c.post("/rules/preview", data=PICK).json()
     assert live3["payload"]["user_cluster_relation_ids"] == ["501", "999"] and live3["payload"]["person"] == "501,999"
     assert live3["payload"]["group_ids"] == ["12"] and "ric" not in live3["payload"]
+    # Mitteilungen über v2: ohne Push und gezielt an Personen oder Gruppen
+    NEWS = dict(RULE, kind="news", extra_params="", t_subject="Alarm", t_body=body)
+    v1 = c.post("/rules/preview", data=NEWS).json()                                   # mit RIC und Push: alter Weg
+    assert v1["plan"]["route"] == "v1" and v1["payload"]["news"] == "1" and v1["payload"]["ric"] == "LZ1"
+    one = c.post("/rules/preview", data=dict(NEWS, ric="", ucr=["501"], push="0")).json()
+    assert one["payload"] == {"News": {"title": "B2 Wohnungsbrand", "text": "Alarm von ls@x.de", "notification_type": 4, "send_push": False,
+                                       "address": "Musterstraße 1, Musterstadt", "send_sms": False, "send_call": False, "send_mail": False,
+                                       "send_pager": False, "user_cluster_relation": [501]},
+                              "instructions": {"user_cluster_relation": {"mapping": "id"}}}, one["payload"]
+    assert one["plan"]["audience"] == "nur die angekreuzten Personen" and one["has_recipient"] and not one["plan"]["notes"]
+    grp = c.post("/rules/preview", data=dict(NEWS, ric="", grp=["12", "13"])).json()   # Gruppen, mit Push, ohne RIC: v2
+    assert grp["payload"]["News"]["notification_type"] == 3 and grp["payload"]["News"]["group"] == [12, 13]
+    assert grp["payload"]["News"]["send_push"] is True and "send_sms" not in grp["payload"]["News"]
+    alle = c.post("/rules/preview", data=dict(NEWS, push="0", extra_params="group_ids=1")).json()  # ohne Push, nur RIC
+    assert alle["payload"]["News"]["notification_type"] == 2 and "group" not in alle["payload"]["News"] and len(alle["plan"]["notes"]) == 2
+    both = c.post("/rules/preview", data=dict(NEWS, ric="", ucr=["501"], grp=["12"])).json()
+    assert both["payload"]["News"]["notification_type"] == 4 and "group" not in both["payload"]["News"] and both["plan"]["notes"]
+    assert c.post("/rules/preview", data=dict(NEWS, kind="alarm", push="0", ucr=["501"])).json()["plan"]["route"] == "v1", "Alarm bleibt beim alten Weg"
+    import httpx as _hx
+    v2wire = {}
+    class _R2:
+        status_code, text = 200, '{"success":true}'
+        def json(self): return {"success": True}
+    def _post2(url, params=None, data=None, json=None, timeout=None):
+        v2wire.update(url=url, json=json, data=data, params=params); return _R2()
+    keep_post, rules.httpx.post = rules.httpx.post, _post2
+    assert rules.send_divera("k", one["payload"])[0] and v2wire["url"].endswith("/api/v2/news") and v2wire["data"] is None
+    assert v2wire["json"]["News"]["user_cluster_relation"] == [501] and v2wire["params"] == {"accesskey": "k"}
+    rules.httpx.post = keep_post
+    askn = c.post("/rules/send-test", data=dict(NEWS, ric="", ucr=["501"], push="0")).text
+    assert "Mitteilung ohne Push gesendet" in askn and "nur die angekreuzten Personen" in askn and "Muster, Max" in askn
+    assert "Geht an alle Mitglieder der Einheit" in c.post("/rules/send-test", data=dict(NEWS, ric="", push="0")).text
+    c.post("/rules/save", data=dict(NEWS, ric="", ucr=["501"], push="0", t_subject="", t_from=""))
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, 1).push is False
+    assert "Mitteilung ohne Push" in c.get("/tenants/1").text and '<option value="0" selected>' in c.get("/rules/1/edit").text
+    c.post("/rules/save", data=dict(RULE, t_subject="", t_from=""))
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, 1).push is True and db.get(m.Rule, 1).kind == "alarm"
+
     # Übertragung: Listen als name[]=wert, damit bei DIVERA ein Array ankommt
     import httpx as _httpx
     wire = {}

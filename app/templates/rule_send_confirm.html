@@ -5,18 +5,25 @@
   {% if data.kind != 'news' %}
   <div class="flash err"><strong>Achtung, echter Alarm:</strong> Die Empfänger werden mit Alarmton alarmiert. Wenn du nur die Übertragung prüfen willst, geh zurück und stelle die Art auf „Mitteilung (leise)".</div>
   {% else %}
-  <div class="flash">Es wird eine Mitteilung (leise) gesendet, keine Alarmierung.</div>
+  <div class="flash">Es wird eine Mitteilung {{ 'mit Push' if data.plan.push else 'ohne Push' }} gesendet, keine Alarmierung.</div>
   {% endif %}
+  {% for n in data.plan.notes %}<div class="flash err">{{ n }}</div>{% endfor %}
+  {% if data.plan.route == 'v2' and data.plan.ntype == 2 %}<div class="flash err"><strong>Geht an alle Mitglieder der Einheit</strong>, weil weder Gruppe noch Person angekreuzt ist.</div>{% endif %}
   {% if not data.has_recipient %}<div class="flash err"><strong>Kein Empfänger angegeben.</strong> An wen DIVERA dann zustellt, hängt von den Einstellungen der Einheit ab. Im Zweifel zurückgehen und nur dich selbst ankreuzen.</div>{% endif %}
   <p>Das wird jetzt sofort und unabhängig vom Testmodus an DIVERA übertragen:</p>
   <div class="live"><div class="msg {{ 'news' if data.kind == 'news' }}">
-    <div class="count">{{ 'Mitteilung (leise)' if data.kind == 'news' else 'Alarm' }}{{ ' · Sonderrechte' if data.priority }}</div>
+    <div class="count">{{ ('Mitteilung' ~ (' (leise)' if data.plan.push else ' ohne Push')) if data.kind == 'news' else 'Alarm' }}{{ ' · Sonderrechte' if data.priority and data.kind != 'news' }}</div>
     {% for f in data.fields %}<div class="{{ {'title': 't', 'address': 'a', 'text': 'x'}[f.key] }}">{{ f.value or ('kein Stichwort' if f.key == 'title' else '') }}</div>{% endfor %}
   </div></div>
   <table style="margin-top:14px">
+    {% if data.plan.route == 'v2' %}
+    <tr><th>Geht an</th><td><strong>{{ data.plan.audience }}</strong>{% if data.plan.ntype == 3 %}: {{ groups|join(', ') }}{% elif data.plan.ntype == 4 %}: {{ persons|join(', ') }}{% endif %}</td></tr>
+    <tr><th>Push</th><td>{{ 'ja' if data.plan.push else 'nein' }}</td></tr>
+    {% else %}
     <tr><th>Empfänger (RIC)</th><td>{{ data.payload.ric or 'keine' }}</td></tr>
     <tr><th>Gruppen</th><td>{{ groups|join(', ') or 'keine' }}</td></tr>
     <tr><th>Personen</th><td>{{ persons|join(', ') or 'keine' }}</td></tr>
+    {% endif %}
   </table>
   <details style="margin-top:12px"><summary>Daten an die DIVERA-API</summary><pre>{{ data.payload|tojson(indent=2) }}</pre></details>
   <form method="post" style="margin-top:18px">

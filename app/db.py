@@ -101,6 +101,7 @@ class Rule(Base):
     ucr_ids: Mapped[str] = mapped_column(String(1000), default="", server_default="")    # einzelne Personen (DIVERA-IDs)
     group_ids: Mapped[str] = mapped_column(String(1000), default="", server_default="")  # Gruppen (DIVERA-IDs)
     priority: Mapped[bool] = mapped_column(Boolean, default=False)
+    push: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")  # nur Mitteilungen: mit oder ohne Push
     extra_params: Mapped[str] = mapped_column(Text, default="")
     stop: Mapped[bool] = mapped_column(Boolean, default=True)
     tenant: Mapped[Tenant] = relationship(back_populates="rules")
@@ -134,7 +135,7 @@ class Processed(Base):
 # Spalten, die nach der ersten Version dazugekommen sind. Bestehende Datenbanken werden beim Start ergänzt.
 ADDED_COLUMNS = {
     "tenants": {"directory": "TEXT DEFAULT '{}'", "directory_ts": "DATETIME"},
-    "rules": {"ucr_ids": "VARCHAR(1000) DEFAULT ''", "group_ids": "VARCHAR(1000) DEFAULT ''"},
+    "rules": {"ucr_ids": "VARCHAR(1000) DEFAULT ''", "group_ids": "VARCHAR(1000) DEFAULT ''", "push": "BOOLEAN DEFAULT 1"},
 }
 
 

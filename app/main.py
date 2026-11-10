@@ -412,6 +412,7 @@ def apply_rule_form(rule: m.Rule, form, db: Session) -> str:
     """Überträgt die Formularwerte auf die Regel. Gibt eine Fehlermeldung zurück oder ''."""
     rule.name = text(form, "name", 120) or "Regel"
     rule.active, rule.priority = "active" in form, "priority" in form
+    rule.push = form.get("push") != "0"
     rule.require_regex, rule.stop = "require_regex" in form, "stop" in form
     rule.kind = "alarm" if form.get("kind") == "alarm" else "news"  # Alarm nur bei ausdrücklicher Auswahl
     try:
@@ -539,7 +540,7 @@ async def rule_send_test(request: Request, db: Session = Depends(get_db), user: 
     ok, detail = await asyncio.to_thread(rules.send_divera, sec.decrypt(tenant.accesskey_enc), data["payload"])
     db.add(m.Log(tenant_id=tenant.id, tenant_name=tenant.name, source_name="Testsendung von Hand", rule_name=rule.name,
                  sender=sample["from"][:200], subject=sample["subject"][:300], status="gesendet" if ok else "fehler",
-                 detail=f"{data['payload'].get('title', '')} | {detail} | ausgelöst von {user.username}"[:2000]))
+                 detail=f"{rules.title_of(data['payload'])} | {detail} | ausgelöst von {user.username}"[:2000]))
     db.commit()
     return rule_page(request, user, tenant, rule, sample=sample, result=evaluate(rule, sample), send_result={"ok": ok, "detail": detail})
 
@@ -582,7 +583,7 @@ async def rule_suggest(sid: int, request: Request, db: Session = Depends(get_db)
             return go(f"/tenants/{source.tenant_id}")
     proposal = suggest.suggest(msg)
     rule = m.Rule(tenant_id=source.tenant_id, source_id=source.id, active=True, position=10, match_body="",
-                  require_regex=False, kind="news", ric="", ucr_ids="", group_ids="", priority=False, extra_params="", stop=True,
+                  require_regex=False, kind="news", ric="", ucr_ids="", group_ids="", priority=False, push=True, extra_params="", stop=True,
                   **proposal["fields"])
     sample = dict(msg, body=msg["body"][:20000], date=m.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
     return rule_page(request, user, source.tenant, rule, sample=sample, result=evaluate(rule, sample), notes=proposal["notes"])
