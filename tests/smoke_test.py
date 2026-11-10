@@ -72,7 +72,12 @@ with TestClient(app, base_url="http://testserver") as c:
     # Live-Ansicht
     assert c.post("/rules/preview", data={k: v for k, v in RULE.items() if k != "t_from"}).json() == {"state": "nosample"}
     live = c.post("/rules/preview", data=dict(RULE, t_subject="ALARM", t_body=body, title_tpl="{stichwort} " + "x" * 60 + " {gibtsnicht}")).json()
-    assert live["match"] and live["conditions"] == [{"label": "Betreff", "needle": "alarm", "ok": True}]
+    assert live["match"] and live["conditions"] == [{"label": "Betreff", "needle": "alarm", "terms": ["alarm"], "hit": "alarm", "ok": True}]
+    multi = dict(RULE, match_subject="Einsatz; ALARM ;", match_from="@kreis.de;ls@x.de", t_subject="Probe-Alarm", t_body=body)
+    live2 = c.post("/rules/preview", data=multi).json()
+    assert live2["match"] and live2["conditions"][0]["hit"] == "ls@x.de" and live2["conditions"][1]["terms"] == ["Einsatz", "ALARM"]
+    assert not c.post("/rules/preview", data=dict(multi, match_subject="Einsatz; Brand")).json()["match"]
+    assert not c.post("/rules/preview", data=dict(multi, match_from="@kreis.de; @bma.de")).json()["match"]
     assert [e["ok"] for e in live["expressions"]] == [True, True] and live["expressions"][1]["groups"] == {"ort": "Musterstraße 1, Musterstadt"}
     title = live["fields"][0]
     assert title["length"] > 50 and len(title["value"]) == 50 and live["payload"]["title"] == title["value"]

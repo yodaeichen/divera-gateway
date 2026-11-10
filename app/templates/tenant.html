@@ -40,7 +40,7 @@
     <td>{{ r.position }}</td>
     <td><a href="/rules/{{ r.id }}/edit"><strong>{{ r.name }}</strong></a>{% if not r.active %} <span class="tag">inaktiv</span>{% endif %}</td>
     <td>{{ r.source.name if r.source else 'alle' }}</td>
-    <td class="detail">{% if r.match_from %}Absender: {{ r.match_from }}<br>{% endif %}{% if r.match_subject %}Betreff: {{ r.match_subject }}<br>{% endif %}{% if r.match_body %}Text: {{ r.match_body }}<br>{% endif %}{% if r.extract_regex %}Regex{% endif %}</td>
+    <td class="detail">{% if r.match_from %}Absender: {{ r.match_from|replace(';', ' oder ') }}<br>{% endif %}{% if r.match_subject %}Betreff: {{ r.match_subject|replace(';', ' oder ') }}<br>{% endif %}{% if r.match_body %}Text: {{ r.match_body|replace(';', ' oder ') }}<br>{% endif %}{% if r.extract_regex %}mit Ausdrücken{% endif %}</td>
     <td>{{ 'Mitteilung' if r.kind == 'news' else 'Alarm' }}{% if r.ric %}<br><span class="hint">{{ r.ric }}</span>{% endif %}</td>
     <td><form class="inline" method="post" action="/rules/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form></td>
   </tr>

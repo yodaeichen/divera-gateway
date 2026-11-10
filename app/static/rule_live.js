@@ -30,7 +30,10 @@
     h += '<h3>Bedingungen</h3><ul>';
     if (!d.conditions.length) h += '<li>Keine Bedingung gesetzt: die Regel greift bei jeder Nachricht der Quelle.</li>';
     d.conditions.forEach(function (c) {
-      h += '<li class="' + (c.ok ? 'yes' : 'no') + '">' + esc(c.label) + ' enthält „' + esc(c.needle) + '“</li>';
+      var terms = c.terms.map(function (t) {
+        return t === c.hit ? '<strong>„' + esc(t) + '“</strong>' : '„' + esc(t) + '“';
+      }).join(' oder ');
+      h += '<li class="' + (c.ok ? 'yes' : 'no') + '">' + esc(c.label) + ' enthält ' + terms + '</li>';
     });
     h += '</ul>';
 

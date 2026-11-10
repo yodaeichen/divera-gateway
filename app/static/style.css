@@ -47,3 +47,8 @@ main { max-width:1280px; }
 .live .warn { background:#fff1d6; color:#7a4b00; border-radius:6px; padding:6px 10px; font-size:13px; margin-top:6px; }
 .live details { margin-top:12px; } .live summary { cursor:pointer; color:var(--muted); font-size:13px; }
 .live pre { font-size:12px; max-height:260px; }
+
+/* Legende und Abschnittsüberschriften der Regelseite */
+h2.step { margin-top:26px; padding-top:16px; border-top:1px solid var(--line); }
+.legend summary { cursor:pointer; font-weight:600; } .legend table { margin-top:12px; } .legend td { font-size:14px; }
+.card .hint + label, .card .hint + .grid { margin-top:14px; }

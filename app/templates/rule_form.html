@@ -24,6 +24,26 @@
 </div>
 {% endif %}
 
+<details class="card legend">
+  <summary>Legende: was gehört wohin?</summary>
+  <table>
+    <tr><th>Abschnitt</th><th>Frage</th><th>Was eintragen</th></tr>
+    <tr><td><strong>1. Bedingungen</strong></td><td>Für welche Nachrichten gilt die Regel?</td><td>Textstücke, die in Absender, Betreff oder Text vorkommen müssen</td></tr>
+    <tr><td><strong>2. Ausdrücke</strong></td><td>Welche Werte sollen aus der Nachricht gelesen werden?</td><td>Je Zeile ein Ausdruck, der z. B. das Stichwort oder den Ort herausliest und als Platzhalter bereitstellt</td></tr>
+    <tr><td><strong>3. Ziel</strong></td><td>Was soll in DIVERA ankommen und bei wem?</td><td>Art, Empfänger, Stichwort, Text und Adresse, als fester Text oder mit Platzhaltern</td></tr>
+    <tr><td><strong>4. Beispielnachricht</strong></td><td>Stimmt das Ergebnis?</td><td>Eine echte Nachricht; die Live-Ansicht rechts zeigt sofort, was daraus würde</td></tr>
+  </table>
+  <table>
+    <tr><th>Zeichen</th><th>Bedeutung</th><th>Beispiel</th></tr>
+    <tr><td><code>;</code> Semikolon</td><td>ODER in einem Bedingungsfeld: einer der Begriffe genügt</td><td><code>Alarm; Einsatz; Brand</code></td></tr>
+    <tr><td>mehrere Felder</td><td>UND zwischen den Bedingungsfeldern: alle ausgefüllten müssen zutreffen</td><td>Absender <em>und</em> Betreff</td></tr>
+    <tr><td><code>,</code> Komma</td><td>Mehrere Empfänger oder IDs für DIVERA</td><td><code>LZ1,LZ2</code> oder <code>group_ids=12,13</code></td></tr>
+    <tr><td><code>{name}</code></td><td>Platzhalter, wird durch den Wert aus der Nachricht ersetzt</td><td><code>{subject}</code>, <code>{stichwort}</code></td></tr>
+    <tr><td>Zeilenumbruch</td><td>Trennt Ausdrücke und weitere API-Parameter</td><td>ein Eintrag je Zeile</td></tr>
+  </table>
+  <p class="hint">Immer verfügbare Platzhalter: <code>{subject}</code> Betreff, <code>{from}</code> Absender, <code>{body}</code> ganzer Text, <code>{date}</code> Empfangszeit.</p>
+</details>
+
 <div class="split">
 <form method="post" action="/rules/save" id="rule-form">
 <div class="card">
@@ -31,46 +51,62 @@
   {% if saved %}<input type="hidden" name="id" value="{{ rule.id }}">{% endif %}
   <input type="hidden" name="tenant_id" value="{{ tenant.id }}">
   <div class="grid">
-    <div><label>Name</label><input type="text" name="name" value="{{ rule.name if rule else '' }}" required></div>
-    <div><label>Rang</label><input type="number" name="position" value="{{ rule.position if rule else 10 }}"></div>
+    <div><label>Name</label><input type="text" name="name" value="{{ rule.name if rule else '' }}" required>
+      <p class="hint">Frei wählbar. Erscheint in der Regelliste und im Protokoll.</p></div>
+    <div><label>Rang</label><input type="number" name="position" value="{{ rule.position if rule else 10 }}">
+      <p class="hint">Reihenfolge der Prüfung, kleinste Zahl zuerst. Spezielle Regeln vor allgemeine setzen.</p></div>
   </div>
   <label>Gilt für Quelle</label>
   <select name="source_id"><option value="">alle Quellen des Kunden</option>
     {% for s in tenant.sources %}<option value="{{ s.id }}" {{ 'selected' if rule and rule.source_id == s.id }}>{{ s.name }} ({{ types[s.type] }})</option>{% endfor %}
   </select>
+  <p class="hint">Beschränkt die Regel auf ein Postfach oder einen Webhook. Ohne Auswahl gilt sie für alle Quellen dieses Kunden.</p>
 
-  <h2 style="margin-top:22px">Wann greift die Regel?</h2>
-  <p class="hint">Alle ausgefüllten Bedingungen müssen zutreffen. Groß- und Kleinschreibung spielt keine Rolle. Leere Felder werden nicht geprüft.</p>
+  <h2 class="step">1. Bedingungen: wann greift die Regel?</h2>
+  <p class="hint">Alle ausgefüllten Felder müssen zutreffen (UND). Innerhalb eines Feldes trennt ein Semikolon Alternativen (ODER). Groß- und Kleinschreibung ist egal, leere Felder werden nicht geprüft.</p>
   <div class="grid">
-    <div><label>Absender enthält</label><input type="text" name="match_from" value="{{ rule.match_from if rule else '' }}"></div>
-    <div><label>Betreff enthält</label><input type="text" name="match_subject" value="{{ rule.match_subject if rule else '' }}"></div>
+    <div><label>Absender enthält</label><input type="text" name="match_from" value="{{ rule.match_from if rule else '' }}" placeholder="leitstelle@kreis.de; @bma-dienst.de">
+      <p class="hint">Adresse oder Teil davon. Nur die Domain (<code>@kreis.de</code>) trifft alle Absender von dort.</p></div>
+    <div><label>Betreff enthält</label><input type="text" name="match_subject" value="{{ rule.match_subject if rule else '' }}" placeholder="Alarmierung; Einsatz">
+      <p class="hint">Wort oder Wortfolge, die im Betreff stehen muss. Keine wechselnden Teile wie Nummern oder Uhrzeiten.</p></div>
   </div>
-  <label>Text enthält</label><input type="text" name="match_body" value="{{ rule.match_body if rule else '' }}">
-  <label>Ausdrücke zum Herauslesen von Werten (optional, einer je Zeile)</label>
-  <textarea name="extract_regex" spellcheck="false" style="min-height:130px" wrap="off">{{ rule.extract_regex if rule else '' }}</textarea>
-  <p class="hint">Jede Zeile ist ein regulärer Ausdruck und wird einzeln auf Betreff und Text angewendet. Benannte Gruppen werden zu Platzhaltern, z. B. <code>^Stichwort:\s*(?P&lt;stichwort&gt;.+)$</code> ergibt <code>{stichwort}</code>. Zeilen, die du nicht brauchst, kannst du löschen.</p>
-  <label class="check"><input type="checkbox" name="require_regex" {{ 'checked' if rule and rule.require_regex }}> Regel greift nur, wenn jeder Ausdruck etwas findet</label>
+  <label>Text enthält</label><input type="text" name="match_body" value="{{ rule.match_body if rule else '' }}" placeholder="FF Eichen; Löschzug 1">
+  <p class="hint">Wort oder Wortfolge im Nachrichtentext. Nützlich, wenn ein Postfach Mails für mehrere Einheiten bekommt.</p>
 
-  <h2 style="margin-top:22px">Was geht an DIVERA?</h2>
-  <p class="hint">Platzhalter: <code>{subject}</code> <code>{from}</code> <code>{body}</code> <code>{date}</code>, dazu die Gruppen aus den Ausdrücken und bei Webhooks die übergebenen Felder.</p>
+  <h2 class="step">2. Ausdrücke: welche Werte werden herausgelesen?</h2>
+  <label>Reguläre Ausdrücke (optional, einer je Zeile)</label>
+  <textarea name="extract_regex" spellcheck="false" style="min-height:130px" wrap="off" placeholder="^Stichwort:\s*(?P&lt;stichwort&gt;.+)$">{{ rule.extract_regex if rule else '' }}</textarea>
+  <p class="hint">Jede Zeile sucht einen Wert in Betreff und Text. Der Name in <code>(?P&lt;name&gt;...)</code> wird zum Platzhalter <code>{name}</code>. Muster für eine Zeile „Bezeichnung: Wert": <code>^Bezeichnung:\s*(?P&lt;name&gt;.+)$</code>. Nicht benötigte Zeilen einfach löschen. Leer lassen, wenn Betreff und ganzer Text genügen.</p>
+  <label class="check"><input type="checkbox" name="require_regex" {{ 'checked' if rule and rule.require_regex }}> Regel greift nur, wenn jeder Ausdruck etwas findet</label>
+  <p class="hint">An: Nachrichten, in denen ein Wert fehlt, lösen nichts aus. Aus: fehlende Werte bleiben einfach leer.</p>
+
+  <h2 class="step">3. Ziel: was geht an DIVERA?</h2>
   <div class="grid">
     <div><label>Art</label><select name="kind"><option value="alarm" {{ 'selected' if not rule or rule.kind == 'alarm' }}>Alarm</option><option value="news" {{ 'selected' if rule and rule.kind == 'news' }}>Mitteilung (leise)</option></select>
       <p class="hint">Alarm: Einsatz mit Alarmton und Rückmeldung. Mitteilung: reine Information ohne Alarmierung.</p></div>
-    <div><label>Empfänger (RIC, durch Komma getrennt)</label><input type="text" name="ric" value="{{ rule.ric if rule else '' }}"></div>
+    <div><label>Empfänger (RIC)</label><input type="text" name="ric" value="{{ rule.ric if rule else '' }}" placeholder="LZ1,LZ2">
+      <p class="hint">Alarmierungs-RIC der Gruppen, genau wie in DIVERA hinterlegt. Mehrere mit Komma trennen.</p></div>
   </div>
-  <label>Stichwort (höchstens 50 Zeichen)</label><input type="text" name="title_tpl" value="{{ rule.title_tpl if rule else '{subject}' }}">
-  <label>Text (höchstens 1000 Zeichen)</label><textarea name="text_tpl">{{ rule.text_tpl if rule else '{body}' }}</textarea>
-  <label>Adresse</label><input type="text" name="address_tpl" value="{{ rule.address_tpl if rule else '' }}">
-  <label>Weitere API-Parameter (eine Zeile je <code>name=wert</code>)</label>
+  <label>Stichwort</label><input type="text" name="title_tpl" value="{{ rule.title_tpl if rule else '{subject}' }}" placeholder="{stichwort}">
+  <p class="hint">Überschrift des Alarms, höchstens 50 Zeichen. Fester Text und Platzhalter lassen sich mischen, z. B. <code>BMA {objekt}</code>.</p>
+  <label>Text</label><textarea name="text_tpl" placeholder="{body}">{{ rule.text_tpl if rule else '{body}' }}</textarea>
+  <p class="hint">Meldungstext, höchstens 1000 Zeichen. <code>{body}</code> übernimmt den ganzen Nachrichtentext.</p>
+  <label>Adresse</label><input type="text" name="address_tpl" value="{{ rule.address_tpl if rule else '' }}" placeholder="{strasse}, {ort}">
+  <p class="hint">Einsatzadresse für Karte und Navigation, höchstens 200 Zeichen. Leer lassen, wenn die Nachricht keine Adresse enthält.</p>
+  <label>Weitere API-Parameter (optional, eine Zeile je <code>name=wert</code>)</label>
   <textarea name="extra_params" spellcheck="false" placeholder="group_ids=12,13&#10;alarmcode_id=5">{{ rule.extra_params if rule else '' }}</textarea>
+  <p class="hint">Zusätzliche Felder der DIVERA-API, z. B. <code>group_ids</code> (Gruppen-IDs), <code>vehicle</code> (Fahrzeuge), <code>alarmcode_id</code> (Alarmvorlage), <code>number</code> (Einsatznummer), <code>lat</code>/<code>lng</code> (Koordinaten). Werte dürfen Platzhalter enthalten.</p>
   <label class="check"><input type="checkbox" name="priority" {{ 'checked' if rule and rule.priority }}> Sonderrechte / Priorität</label>
+  <p class="hint">Kennzeichnet den Einsatz in DIVERA als Einsatz mit Sonderrechten.</p>
   <label class="check"><input type="checkbox" name="stop" {{ 'checked' if not rule or rule.stop }}> Nach dieser Regel keine weiteren Regeln prüfen</label>
+  <p class="hint">An: je Nachricht löst nur die erste passende Regel aus. Aus: weitere passende Regeln lösen zusätzlich aus.</p>
   <label class="check"><input type="checkbox" name="active" {{ 'checked' if not rule or rule.active }}> Aktiv</label>
+  <p class="hint">Inaktive Regeln bleiben gespeichert, werden im Betrieb aber übersprungen.</p>
 </div>
 
 <div class="card">
-  <h2>Beispielnachricht zum Ausprobieren</h2>
-  <p class="hint">Hier eine echte Nachricht einfügen oder über „Verbindung testen" bei der Quelle eine Nachricht übernehmen. Die Beispielnachricht wird nicht gespeichert.</p>
+  <h2 class="step" style="margin-top:0">4. Beispielnachricht zum Ausprobieren</h2>
+  <p class="hint">Eine echte Nachricht einfügen oder über „Verbindung testen" bei der Quelle übernehmen. Sie dient nur der Live-Ansicht und wird nicht gespeichert.</p>
   <div class="grid">
     <div><label>Absender</label><input type="text" name="t_from" value="{{ sample.from if sample else '' }}"></div>
     <div><label>Betreff</label><input type="text" name="t_subject" value="{{ sample.subject if sample else '' }}"></div>
@@ -85,5 +121,5 @@
 </form>
 <aside id="live" class="card live"><h2>Live-Ansicht</h2><p class="hint">Wird geladen. Ohne JavaScript bitte „Prüfen ohne Speichern" verwenden.</p></aside>
 </div>
-<script src="/static/rule_live.js?v=3" defer></script>
+<script src="/static/rule_live.js?v=4" defer></script>
 {% endblock %}

@@ -323,7 +323,7 @@ def apply_rule_form(rule: m.Rule, form, db: Session) -> str:
         raise HTTPException(400, "Quelle gehört zu einem anderen Kunden")
     rule.source_id = source_id
     for key in ("match_from", "match_subject", "match_body"):
-        setattr(rule, key, text(form, key, 200))
+        setattr(rule, key, text(form, key, 500))
     rule.ric = text(form, "ric", 300)
     for key in ("extract_regex", "title_tpl", "text_tpl", "address_tpl", "extra_params"):
         setattr(rule, key, str(form.get(key, "")).replace("\r\n", "\n").strip()[:4000])

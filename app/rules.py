@@ -22,6 +22,11 @@ def render(template: str, values: dict) -> str:
     return _PLACEHOLDER.sub(lambda mt: str(values.get(mt.group(1), "")), template or "").strip()
 
 
+def split_terms(needle: str) -> list[str]:
+    """Zerlegt ein Bedingungsfeld an Semikolons in einzelne Suchbegriffe."""
+    return [term.strip() for term in (needle or "").split(";") if term.strip()]
+
+
 def analyse(rule: m.Rule, msg: dict, strict: bool = False) -> dict:
     """Wertet eine Regel gegen eine Nachricht aus und hält jeden Zwischenschritt fest.
 
@@ -31,8 +36,10 @@ def analyse(rule: m.Rule, msg: dict, strict: bool = False) -> dict:
     conditions = []
     for label, needle, haystack in (("Absender", rule.match_from, msg["from"]), ("Betreff", rule.match_subject, msg["subject"]),
                                     ("Text", rule.match_body, msg["body"])):
-        if needle:
-            conditions.append({"label": label, "needle": needle, "ok": needle.lower() in (haystack or "").lower()})
+        terms = split_terms(needle)
+        if terms:  # mehrere Begriffe mit Semikolon: einer davon genügt
+            hit = next((term for term in terms if term.lower() in (haystack or "").lower()), "")
+            conditions.append({"label": label, "needle": needle, "terms": terms, "hit": hit, "ok": bool(hit)})
     values = {k: str(v) for k, v in (msg.get("extra") or {}).items()}
     values.update({"from": msg["from"], "subject": msg["subject"], "body": msg["body"], "date": msg.get("date", "")})
     haystack = msg["subject"] + "\n" + msg["body"].replace("\r\n", "\n")
