@@ -1,0 +1,166 @@
+"""Abruf neuer Nachrichten aus Microsoft 365 (Graph) und IMAP.
+
+Jeder Poller bekommt (config, state) und liefert (nachrichten, neuer_state).
+Beim ersten Lauf wird nur der aktuelle Stand gemerkt; alte Mails lösen nichts aus.
+Nachricht: {"id", "from", "subject", "body", "date", "ts" (datetime, UTC)}
+"""
+import datetime as dt
+import email
+import html
+import imaplib
+import re
+from email import policy
+from email.utils import parseaddr, parsedate_to_datetime
+
+import httpx
+
+GRAPH = "https://graph.microsoft.com/v1.0"
+MAX_PER_POLL = 50
+TIMEOUT = 20
+
+
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def html_to_text(markup: str) -> str:
+    markup = re.sub(r"(?is)<(script|style).*?</\1>", "", markup)
+    markup = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</tr>", "\n", markup)
+    text = html.unescape(re.sub(r"<[^>]+>", "", markup))
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+# ---------- Microsoft 365 ----------
+
+def _graph_token(cfg: dict) -> str:
+    resp = httpx.post(
+        f"https://login.microsoftonline.com/{cfg['tenant_id']}/oauth2/v2.0/token",
+        data={"grant_type": "client_credentials", "client_id": cfg["client_id"],
+              "client_secret": cfg.get("client_secret", ""), "scope": "https://graph.microsoft.com/.default"},
+        timeout=TIMEOUT)
+    if resp.status_code != 200:
+        info = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+        raise RuntimeError("Anmeldung bei Microsoft fehlgeschlagen: " + str(info.get("error_description", resp.status_code))[:300])
+    return resp.json()["access_token"]
+
+
+def _graph_messages(cfg: dict, params: dict) -> list[dict]:
+    token = _graph_token(cfg)
+    folder = cfg.get("folder") or "inbox"
+    url = f"{GRAPH}/users/{cfg['mailbox']}/mailFolders/{folder}/messages"
+    headers = {"Authorization": f"Bearer {token}", "Prefer": 'outlook.body-content-type="text"'}
+    items: list[dict] = []
+    while url and len(items) < MAX_PER_POLL:
+        resp = httpx.get(url, params=params, headers=headers, timeout=TIMEOUT)
+        if resp.status_code != 200:
+            try:
+                reason = resp.json()["error"]["message"]
+            except Exception:
+                reason = resp.text
+            raise RuntimeError(f"Graph-Fehler {resp.status_code}: {reason[:300]}")
+        data = resp.json()
+        items.extend(data.get("value", []))
+        url, params = data.get("@odata.nextLink"), None
+    return items[:MAX_PER_POLL]
+
+
+def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
+    if "since" not in state:
+        _graph_token(cfg)  # Zugang prüfen, Startpunkt merken
+        return [], {"since": _now().strftime("%Y-%m-%dT%H:%M:%SZ")}
+    raw = _graph_messages(cfg, {
+        "$filter": f"receivedDateTime ge {state['since']}",
+        "$orderby": "receivedDateTime asc",
+        "$top": str(MAX_PER_POLL),
+        "$select": "id,internetMessageId,subject,from,body,receivedDateTime",
+    })
+    messages = []
+    for item in raw:
+        received = item.get("receivedDateTime", "")
+        ts = dt.datetime.fromisoformat(received.replace("Z", "+00:00")) if received else _now()
+        messages.append({
+            "id": item.get("internetMessageId") or item["id"],
+            "from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
+            "subject": item.get("subject") or "",
+            "body": ((item.get("body") or {}).get("content") or "").strip(),
+            "date": received, "ts": ts,
+        })
+        state = {"since": received or state["since"]}
+    return messages, state
+
+
+def test_m365(cfg: dict) -> str:
+    found = _graph_messages(cfg, {"$top": "1", "$select": "id"})
+    return f"Verbindung in Ordnung, Ordner erreichbar ({len(found)} Nachricht gelesen)."
+
+
+# ---------- IMAP ----------
+
+def _imap_connect(cfg: dict) -> imaplib.IMAP4:
+    host, port = cfg["host"], int(cfg.get("port") or 993)
+    if (cfg.get("security") or "ssl") == "ssl":
+        conn = imaplib.IMAP4_SSL(host, port, timeout=TIMEOUT)
+    else:
+        conn = imaplib.IMAP4(host, port, timeout=TIMEOUT)
+        conn.starttls()
+    conn.login(cfg["username"], cfg.get("password", ""))
+    status, _ = conn.select(cfg.get("folder") or "INBOX", readonly=True)
+    if status != "OK":
+        raise RuntimeError("IMAP-Ordner nicht gefunden.")
+    return conn
+
+
+def _imap_uids(conn: imaplib.IMAP4, criteria: str) -> list[int]:
+    status, data = conn.uid("search", None, criteria)
+    if status != "OK":
+        raise RuntimeError("IMAP-Suche fehlgeschlagen.")
+    return sorted(int(u) for u in (data[0] or b"").split())
+
+
+def poll_imap(cfg: dict, state: dict) -> tuple[list[dict], dict]:
+    conn = _imap_connect(cfg)
+    try:
+        validity = (conn.response("UIDVALIDITY")[1] or [b"0"])[0]
+        validity = validity.decode() if isinstance(validity, bytes) else str(validity)
+        if state.get("uidvalidity") != validity or "last_uid" not in state:
+            uids = _imap_uids(conn, "ALL")
+            return [], {"uidvalidity": validity, "last_uid": uids[-1] if uids else 0}
+        last = int(state["last_uid"])
+        uids = [u for u in _imap_uids(conn, f"UID {last + 1}:*") if u > last][:MAX_PER_POLL]
+        messages = []
+        for uid in uids:
+            status, data = conn.uid("fetch", str(uid), "(BODY.PEEK[])")
+            last = uid
+            if status != "OK" or not data or not isinstance(data[0], tuple):
+                continue
+            mail = email.message_from_bytes(data[0][1], policy=policy.default)
+            part = mail.get_body(preferencelist=("plain", "html"))
+            body = part.get_content() if part else ""
+            if part and part.get_content_type() == "text/html":
+                body = html_to_text(body)
+            try:
+                ts = parsedate_to_datetime(str(mail["Date"]))
+                ts = ts.replace(tzinfo=dt.timezone.utc) if ts.tzinfo is None else ts.astimezone(dt.timezone.utc)
+            except (TypeError, ValueError):
+                ts = _now()
+            messages.append({
+                "id": f"{validity}:{uid}", "from": parseaddr(str(mail.get("From", "")))[1],
+                "subject": str(mail.get("Subject", "")), "body": str(body).strip(),
+                "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": ts,
+            })
+        return messages, {"uidvalidity": validity, "last_uid": last}
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+
+def test_imap(cfg: dict) -> str:
+    conn = _imap_connect(cfg)
+    conn.logout()
+    return "Verbindung in Ordnung, Anmeldung und Ordner erreichbar."
+
+
+POLLERS = {"m365": poll_m365, "imap": poll_imap}
+TESTERS = {"m365": test_m365, "imap": test_imap}

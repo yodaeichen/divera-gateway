@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Protokoll</h1>
+<div class="card">
+  <form method="get" action="/logs" class="row" style="justify-content:flex-start">
+    <select name="tenant" style="width:auto"><option value="">alle Kunden</option>{% for t in tenants %}<option value="{{ t.id }}" {{ 'selected' if sel_tenant == t.id }}>{{ t.name }}</option>{% endfor %}</select>
+    <select name="status" style="width:auto"><option value="">jeder Status</option>{% for s in ['gesendet','test','fehler','ignoriert','veraltet'] %}<option {{ 'selected' if sel_status == s }}>{{ s }}</option>{% endfor %}</select>
+    <button class="light">Filtern</button>
+  </form>
+  {% include "_logtable.html" %}
+  <p class="hint">Gezeigt werden die letzten 300 Einträge. Der Mailtext selbst wird nicht gespeichert.</p>
+</div>
+{% endblock %}

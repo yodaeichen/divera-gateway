@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}DIVERA Gateway{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% if user %}
+<header>
+  <div class="brand">DIVERA <span>Gateway</span></div>
+  <nav><a href="/">Kunden</a><a href="/logs">Protokoll</a><a href="/users">Benutzer</a></nav>
+  <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Abmelden ({{ user.username }})</button></form>
+</header>
+{% endif %}
+<main>
+{% if flash %}<div class="flash {{ 'err' if flash[0] == 'err' else '' }}">{{ flash[1] }}</div>{% endif %}
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

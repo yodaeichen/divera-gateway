@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+  <h1>{{ tenant.name }}
+    {% if not tenant.active %}<span class="tag">inaktiv</span>{% elif tenant.test_mode %}<span class="tag test">Testmodus</span>{% else %}<span class="tag gesendet">scharf</span>{% endif %}</h1>
+  <a class="btn light" href="/tenants/{{ tenant.id }}/edit">Kunde bearbeiten</a>
+</div>
+{% if not tenant.accesskey_enc %}<div class="flash err">Es ist noch kein DIVERA-Accesskey hinterlegt.</div>{% endif %}
+
+<div class="card">
+  <div class="row"><h2>Quellen</h2>
+    <div>{% for key, label in types.items() %}<a class="btn light" href="/tenants/{{ tenant.id }}/sources/new?type={{ key }}">+ {{ label }}</a> {% endfor %}</div></div>
+  <table>
+  <tr><th>Name</th><th>Typ</th><th>Zustand</th><th></th></tr>
+  {% for s in tenant.sources %}
+  <tr>
+    <td><a href="/sources/{{ s.id }}/edit"><strong>{{ s.name }}</strong></a>{% if not s.active %} <span class="tag">inaktiv</span>{% endif %}</td>
+    <td>{{ types[s.type] }}</td>
+    <td>
+      {% if s.type == 'webhook' %}<code>{{ base_url }}hook/{{ s.webhook_token }}</code>
+      {% elif s.last_error %}<span class="tag fehler">Fehler</span> <span class="hint">{{ s.last_error }}</span>
+      {% else %}Letzte Abfrage: {{ s.last_poll|localtime }}{% endif %}
+    </td>
+    <td style="white-space:nowrap">
+      {% if s.type != 'webhook' %}<form class="inline" method="post" action="/sources/{{ s.id }}/test"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Verbindung testen</button></form>
+      {% else %}<form class="inline" method="post" action="/sources/{{ s.id }}/token"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Adresse erneuern</button></form>{% endif %}
+      <form class="inline" method="post" action="/sources/{{ s.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form>
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="4">Noch keine Quelle.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <div class="row"><h2>Regeln</h2><a class="btn" href="/tenants/{{ tenant.id }}/rules/new">Regel anlegen</a></div>
+  <table>
+  <tr><th>Rang</th><th>Name</th><th>Quelle</th><th>Bedingungen</th><th>Ziel</th><th></th></tr>
+  {% for r in tenant.rules %}
+  <tr>
+    <td>{{ r.position }}</td>
+    <td><a href="/rules/{{ r.id }}/edit"><strong>{{ r.name }}</strong></a>{% if not r.active %} <span class="tag">inaktiv</span>{% endif %}</td>
+    <td>{{ r.source.name if r.source else 'alle' }}</td>
+    <td class="detail">{% if r.match_from %}Absender: {{ r.match_from }}<br>{% endif %}{% if r.match_subject %}Betreff: {{ r.match_subject }}<br>{% endif %}{% if r.match_body %}Text: {{ r.match_body }}<br>{% endif %}{% if r.extract_regex %}Regex{% endif %}</td>
+    <td>{{ 'Mitteilung' if r.kind == 'news' else 'Alarm' }}{% if r.ric %}<br><span class="hint">{{ r.ric }}</span>{% endif %}</td>
+    <td><form class="inline" method="post" action="/rules/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form></td>
+  </tr>
+  {% else %}<tr><td colspan="6">Noch keine Regel. Ohne Regel wird nichts an DIVERA übergeben.</td></tr>{% endfor %}
+  </table>
+  <p class="hint">Regeln werden nach Rang geprüft, kleinste Zahl zuerst.</p>
+</div>
+<p><a href="/logs?tenant={{ tenant.id }}">Protokoll dieses Kunden</a></p>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row"><h1>Kunden</h1><a class="btn" href="/tenants/new">Kunde anlegen</a></div>
+<div class="card">
+<table>
+<tr><th>Name</th><th>Quellen</th><th>Regeln</th><th>Status</th></tr>
+{% for t in tenants %}
+<tr>
+  <td><a href="/tenants/{{ t.id }}"><strong>{{ t.name }}</strong></a></td>
+  <td>{{ t.sources|length }}{% set errs = t.sources|selectattr('last_error')|list %}{% if errs %} <span class="tag fehler">{{ errs|length }} mit Fehler</span>{% endif %}</td>
+  <td>{{ t.rules|length }}</td>
+  <td>{% if not t.active %}<span class="tag">inaktiv</span>{% elif t.test_mode %}<span class="tag test">Testmodus</span>{% else %}<span class="tag gesendet">scharf</span>{% endif %}</td>
+</tr>
+{% else %}
+<tr><td colspan="4">Noch kein Kunde angelegt.</td></tr>
+{% endfor %}
+</table>
+</div>
+<div class="card">
+  <div class="row"><h2>Letzte Ereignisse</h2><a href="/logs">Ganzes Protokoll</a></div>
+  {% include "_logtable.html" %}
+</div>
+{% endblock %}

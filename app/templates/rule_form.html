@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ 'Regel bearbeiten' if rule else 'Regel anlegen' }} <span class="hint">({{ tenant.name }})</span></h1>
+<div class="card">
+<form method="post" action="/rules/save">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if rule %}<input type="hidden" name="id" value="{{ rule.id }}">{% else %}<input type="hidden" name="tenant_id" value="{{ tenant.id }}">{% endif %}
+  <div class="grid">
+    <div><label>Name</label><input type="text" name="name" value="{{ rule.name if rule else '' }}" required></div>
+    <div><label>Rang</label><input type="number" name="position" value="{{ rule.position if rule else 10 }}"></div>
+  </div>
+  <label>Gilt für Quelle</label>
+  <select name="source_id"><option value="">alle Quellen des Kunden</option>
+    {% for s in tenant.sources %}<option value="{{ s.id }}" {{ 'selected' if rule and rule.source_id == s.id }}>{{ s.name }} ({{ types[s.type] }})</option>{% endfor %}
+  </select>
+
+  <h2 style="margin-top:22px">Wann greift die Regel?</h2>
+  <p class="hint">Alle ausgefüllten Bedingungen müssen zutreffen. Groß- und Kleinschreibung spielt keine Rolle. Leere Felder werden nicht geprüft.</p>
+  <div class="grid">
+    <div><label>Absender enthält</label><input type="text" name="match_from" value="{{ rule.match_from if rule else '' }}"></div>
+    <div><label>Betreff enthält</label><input type="text" name="match_subject" value="{{ rule.match_subject if rule else '' }}"></div>
+  </div>
+  <label>Text enthält</label><input type="text" name="match_body" value="{{ rule.match_body if rule else '' }}">
+  <label>Regulärer Ausdruck zum Herauslesen von Werten (optional)</label>
+  <textarea name="extract_regex" spellcheck="false">{{ rule.extract_regex if rule else '' }}</textarea>
+  <p class="hint">Wird auf Betreff und Text angewendet. Benannte Gruppen werden zu Platzhaltern, z. B. <code>Stichwort:\s*(?P&lt;stichwort&gt;.+)</code> ergibt <code>{stichwort}</code>.</p>
+  <label class="check"><input type="checkbox" name="require_regex" {{ 'checked' if rule and rule.require_regex }}> Regel greift nur, wenn der Ausdruck etwas findet</label>
+
+  <h2 style="margin-top:22px">Was geht an DIVERA?</h2>
+  <p class="hint">Platzhalter: <code>{subject}</code> <code>{from}</code> <code>{body}</code> <code>{date}</code>, dazu die Gruppen aus dem Ausdruck und bei Webhooks die übergebenen Felder.</p>
+  <div class="grid">
+    <div><label>Art</label><select name="kind"><option value="alarm" {{ 'selected' if not rule or rule.kind == 'alarm' }}>Alarm</option><option value="news" {{ 'selected' if rule and rule.kind == 'news' }}>Mitteilung (leise)</option></select></div>
+    <div><label>Empfänger (RIC, durch Komma getrennt)</label><input type="text" name="ric" value="{{ rule.ric if rule else '' }}"></div>
+  </div>
+  <label>Stichwort (höchstens 50 Zeichen)</label><input type="text" name="title_tpl" value="{{ rule.title_tpl if rule else '{subject}' }}">
+  <label>Text (höchstens 1000 Zeichen)</label><textarea name="text_tpl">{{ rule.text_tpl if rule else '{body}' }}</textarea>
+  <label>Adresse</label><input type="text" name="address_tpl" value="{{ rule.address_tpl if rule else '' }}">
+  <label>Weitere API-Parameter (eine Zeile je <code>name=wert</code>)</label>
+  <textarea name="extra_params" spellcheck="false" placeholder="group_ids=12,13&#10;alarmcode_id=5">{{ rule.extra_params if rule else '' }}</textarea>
+  <label class="check"><input type="checkbox" name="priority" {{ 'checked' if rule and rule.priority }}> Sonderrechte / Priorität</label>
+  <label class="check"><input type="checkbox" name="stop" {{ 'checked' if not rule or rule.stop }}> Nach dieser Regel keine weiteren Regeln prüfen</label>
+  <label class="check"><input type="checkbox" name="active" {{ 'checked' if not rule or rule.active }}> Aktiv</label>
+  <div class="actions"><button>Speichern</button><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zum Kunden</a></div>
+</form>
+</div>
+
+{% if rule %}
+<div class="card">
+  <h2>Regel ausprobieren</h2>
+  <p class="hint">Prüft die gespeicherte Regel gegen eine Beispielnachricht. Es wird nichts gesendet.</p>
+  <form method="post" action="/rules/{{ rule.id }}/test">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid">
+      <div><label>Absender</label><input type="text" name="t_from" value="{{ sample.from if sample else '' }}"></div>
+      <div><label>Betreff</label><input type="text" name="t_subject" value="{{ sample.subject if sample else '' }}"></div>
+    </div>
+    <label>Text</label><textarea name="t_body" style="min-height:140px">{{ sample.body if sample else '' }}</textarea>
+    <div class="actions"><button class="light">Prüfen</button></div>
+  </form>
+  {% if result %}
+    {% if result.error %}<div class="flash err" style="margin-top:14px">Ausdruck fehlerhaft: {{ result.error }}</div>
+    {% elif result.match %}<div class="flash" style="margin-top:14px">Die Regel greift. Das würde an DIVERA gehen:</div>
+    <pre>{{ result.payload|tojson(indent=2) }}</pre>
+    <p class="hint">Erkannte Platzhalter: {% for k, v in result['values'].items() %}<code>{{ '{' ~ k ~ '}' }}</code> = {{ v }}{{ ', ' if not loop.last }}{% endfor %}</p>
+    {% else %}<div class="flash err" style="margin-top:14px">Die Regel greift bei dieser Nachricht nicht.</div>{% endif %}
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

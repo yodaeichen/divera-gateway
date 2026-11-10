@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ types[stype] }}-Quelle für {{ tenant.name }}</h1>
+<div class="card">
+<form method="post" action="/sources/save" autocomplete="off">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if source %}<input type="hidden" name="id" value="{{ source.id }}">{% else %}
+  <input type="hidden" name="tenant_id" value="{{ tenant.id }}"><input type="hidden" name="type" value="{{ stype }}">{% endif %}
+  <label>Bezeichnung</label><input type="text" name="name" value="{{ source.name if source else '' }}" required>
+
+  {% if stype == 'm365' %}
+  <div class="grid">
+    <div><label>Verzeichnis-ID (Tenant-ID)</label><input type="text" name="directory_id" value="{{ cfg.tenant_id or '' }}" required></div>
+    <div><label>Anwendungs-ID (Client-ID)</label><input type="text" name="client_id" value="{{ cfg.client_id or '' }}" required></div>
+    <div><label>Geheimer Clientschlüssel</label><input type="password" name="client_secret" autocomplete="new-password" placeholder="{{ 'gespeichert, leer lassen zum Beibehalten' if source else '' }}" {{ '' if source else 'required' }}></div>
+    <div><label>Postfach (E-Mail-Adresse)</label><input type="text" name="mailbox" value="{{ cfg.mailbox or '' }}" required></div>
+    <div><label>Ordner</label><input type="text" name="folder" value="{{ cfg.folder or 'inbox' }}"><p class="hint">Standardnamen wie <code>inbox</code> oder eine Ordner-ID.</p></div>
+  </div>
+  <p class="hint">Benötigt eine App-Registrierung in Entra ID mit der Anwendungsberechtigung Mail.Read. Anleitung in der README.</p>
+  {% elif stype == 'imap' %}
+  <div class="grid">
+    <div><label>Server</label><input type="text" name="host" value="{{ cfg.host or '' }}" required></div>
+    <div><label>Port</label><input type="number" name="port" value="{{ cfg.port or 993 }}"></div>
+    <div><label>Verschlüsselung</label><select name="security"><option value="ssl" {{ 'selected' if cfg.security != 'starttls' }}>SSL/TLS</option><option value="starttls" {{ 'selected' if cfg.security == 'starttls' }}>STARTTLS</option></select></div>
+    <div><label>Ordner</label><input type="text" name="folder" value="{{ cfg.folder or 'INBOX' }}"></div>
+    <div><label>Benutzername</label><input type="text" name="username" value="{{ cfg.username or '' }}" required></div>
+    <div><label>Passwort</label><input type="password" name="password" autocomplete="new-password" placeholder="{{ 'gespeichert, leer lassen zum Beibehalten' if source else '' }}" {{ '' if source else 'required' }}></div>
+  </div>
+  <p class="hint">Die Mails werden nur gelesen und nicht als gelesen markiert.</p>
+  {% else %}
+  <p class="hint">Nach dem Speichern bekommt die Quelle eine geheime Adresse. Andere Systeme schicken per HTTP-POST JSON oder Formulardaten dorthin. Die Felder <code>subject</code>, <code>body</code> und <code>from</code> werden wie bei einer Mail behandelt, alle weiteren Felder stehen als Platzhalter zur Verfügung.</p>
+  {% endif %}
+
+  {% if stype != 'webhook' %}
+  <label>Abfrageintervall in Sekunden</label><input type="number" name="poll_interval" min="10" max="3600" value="{{ source.poll_interval if source else 30 }}">
+  {% endif %}
+  <label class="check"><input type="checkbox" name="active" {{ 'checked' if not source or source.active }}> Aktiv</label>
+  <div class="actions"><button>Speichern</button><a class="btn light" href="/tenants/{{ tenant.id }}">Abbrechen</a></div>
+</form>
+</div>
+{% endblock %}

@@ -1,0 +1,12 @@
+<table>
+<tr><th>Zeit</th><th>Kunde</th><th>Quelle</th><th>Absender / Betreff</th><th>Regel</th><th>Status</th><th>Details</th></tr>
+{% for l in logs %}
+<tr>
+  <td>{{ l.ts|localtime }}</td><td>{{ l.tenant_name }}</td><td>{{ l.source_name }}</td>
+  <td>{{ l.sender }}<br><strong>{{ l.subject }}</strong></td><td>{{ l.rule_name }}</td>
+  <td><span class="tag {{ l.status }}">{{ l.status }}</span></td><td class="detail">{{ l.detail }}</td>
+</tr>
+{% else %}
+<tr><td colspan="7">Noch keine Einträge.</td></tr>
+{% endfor %}
+</table>
