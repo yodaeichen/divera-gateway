@@ -6,9 +6,10 @@
 <div class="flash {{ 'err' if failed or skipped else '' }}"><strong>{{ created }} {{ 'Termin' if created == 1 else 'Termine' }} in DIVERA angelegt</strong>{% if failed %}, {{ failed }} fehlgeschlagen{% endif %}{% if skipped %}, {{ skipped }} nicht mehr versucht, weil DIVERA den Schlüssel abgelehnt hat{% endif %}.{{ hint }}</div>
 <div class="card">
   <table>
-    <tr><th>Zeile</th><th>Termin</th><th>Wann</th><th>Geht an</th><th>Ergebnis</th><th>Antwort von DIVERA</th></tr>
+    <tr><th>Zeile</th><th>Termin</th><th>Wann</th><th>Geht an</th><th>Benachrichtigung</th><th>Erinnerung</th><th>Rückmeldung</th><th>Ergebnis</th><th>Antwort von DIVERA</th></tr>
     {% for r in results %}
-    <tr><td>{{ r.row.line }}</td><td><strong>{{ r.row.title }}</strong></td><td>{{ r.row.when }}</td><td>{{ r.audience }}</td>
+    <tr><td>{{ r.row.line }}</td><td><strong>{{ r.row.title }}</strong></td><td>{{ r.row.when }}</td><td>{{ r.info.audience }}</td>
+      <td>{{ r.info.channels }}</td><td>{{ r.info.reminder }}</td><td>{{ r.info.response }}</td>
       <td><span class="tag {{ 'gesendet' if r.ok else 'fehler' }}">{{ 'angelegt' if r.ok else 'fehlgeschlagen' }}</span></td><td class="detail">{{ r.detail }}</td></tr>
     {% endfor %}
   </table>
@@ -24,10 +25,11 @@
 
 <div class="card">
   <table>
-    <tr><th>Zeile</th><th>Termin</th><th>Wann</th><th>Ort</th><th>Gruppen</th><th>Zustand</th></tr>
+    <tr><th>Zeile</th><th>Termin</th><th>Wann</th><th>Ort</th><th>Gruppen</th>{% if own_reminder %}<th>Erinnerung</th>{% endif %}{% if own_response %}<th>Rückmeldung</th>{% endif %}<th>Zustand</th></tr>
     {% for r in rows %}
     <tr><td>{{ r.line }}</td><td><strong>{{ r.title or '(ohne Titel)' }}</strong>{% if r.text %}<br><span class="hint">{{ r.text[:120] }}</span>{% endif %}</td>
       <td>{{ r.when }}{% for n in r.notes %}<br><span class="hint">{{ n }}</span>{% endfor %}</td><td>{{ r.address }}</td><td>{{ r.groups|join(', ') }}</td>
+      {% if own_reminder %}<td>{{ ev.show(r.reminder_ts) }}</td>{% endif %}{% if own_response %}<td>{{ {'none': 'keine', 'yesno': 'ja / nein', 'text': 'ja / nein und Freitext'}.get(r.response, '') }}</td>{% endif %}
       <td>{% if r.state == 'neu' %}<span class="tag gesendet">neu</span>{% elif r.state == 'vorhanden' %}<span class="tag">schon importiert</span>
           {% else %}<span class="tag fehler">Fehler</span><br><span class="hint">{{ r.errors|join('; ') }}</span>{% endif %}</td></tr>
     {% endfor %}
@@ -46,11 +48,30 @@
   {% if directory.persons %}<div class="picklist">{% for p in directory.persons %}<label class="check"><input type="checkbox" name="ucr" value="{{ p.id }}"> {{ p.name }}</label>{% endfor %}</div>{% endif %}
   {% if not directory.groups and not directory.persons %}<p class="hint">Für Gruppen oder Personen zuerst bei der Löschgruppe „Empfänger aus DIVERA laden".</p>{% endif %}
 
-  <h2 class="step">Benachrichtigung</h2>
-  <label class="check"><input type="checkbox" name="push"> Beim Anlegen eine Push-Nachricht je Termin senden</label>
-  <p class="hint">Aus ist bei einem Import meist richtig: Sonst bekommt jeder Empfänger für jeden der {{ counts.neu }} Termine eine eigene Nachricht.</p>
-  <label>Erinnerung vor dem Termin, in Stunden</label><input type="number" name="reminder_hours" min="0" max="720" placeholder="keine" style="max-width:160px">
-  <p class="hint">Leer lassen für keine Erinnerung. Mit z. B. 24 erinnert DIVERA einen Tag vorher per Push.</p>
+  <h2 class="step">Benachrichtigung beim Anlegen</h2>
+  <p class="hint">Wie die Empfänger erfahren, dass es den Termin gibt. Mehrere Wege lassen sich ankreuzen. Nichts angekreuzt ist bei einem Import meist richtig: Sonst bekommt jeder Empfänger für jeden der {{ counts.neu }} Termine eine eigene Nachricht.</p>
+  {% for name, label in ev.CHANNELS %}<label class="check"><input type="checkbox" name="channel" value="{{ name }}"> {{ label }}</label>{% endfor %}
+  <p class="hint">SMS und Sprachanruf können in DIVERA Kosten verursachen und müssen dort für die Einheit eingerichtet sein.</p>
+
+  <h2 class="step">Erinnerung vor dem Termin</h2>
+  {% if own_reminder %}<p class="hint">Zeilen mit eigenem Eintrag in der Spalte „Erinnerung" behalten ihren Zeitpunkt. Die Auswahl hier gilt für alle übrigen Zeilen.</p>{% endif %}
+  <label class="check"><input type="radio" name="reminder_mode" value="none" checked> Keine Erinnerung</label>
+  <label class="check"><input type="radio" name="reminder_mode" value="before"> Vor jedem Termin:
+    <input type="number" name="reminder_days" value="1" min="0" max="60" style="width:80px"> Tage vorher um
+    <input type="time" name="reminder_time" value="18:00" style="width:auto"> Uhr</label>
+  <p class="hint">0 Tage bedeutet am Tag des Termins. Passt für Dateien mit vielen Terminen: Jeder Termin bekommt seine eigene Erinnerung.</p>
+  <label class="check"><input type="radio" name="reminder_mode" value="fixed"> Zu einem festen Zeitpunkt:
+    <input type="datetime-local" name="reminder_at" style="width:auto"></label>
+  <p class="hint">Ein Zeitpunkt für alle Termine der Datei, gewählt über den Kalender. Sinnvoll bei einem einzelnen Termin. Termine, die vor diesem Zeitpunkt beginnen, bekommen keine Erinnerung.</p>
+  <label>Erinnern per</label>
+  {% for name, label in ev.REMINDER_CHANNELS %}<label class="check"><input type="checkbox" name="reminder_channel" value="{{ name }}" {{ 'checked' if name == 'push' }}> {{ label }}</label>{% endfor %}
+  <p class="hint">Für Erinnerungen bietet DIVERA nur diese beiden Wege an.</p>
+
+  <h2 class="step">Rückmeldung</h2>
+  {% if own_response %}<p class="hint">Zeilen mit eigenem Eintrag in der Spalte „Rückmeldung" behalten ihre Einstellung.</p>{% endif %}
+  {% for value, label in ev.RESPONSES %}<label class="check"><input type="radio" name="response" value="{{ value }}" {{ 'checked' if value == 'none' }}> {{ label }}</label>{% endfor %}
+  <label>Antwort erbeten bis (optional)</label><input type="datetime-local" name="response_until" style="max-width:260px">
+  <p class="hint">Leer lassen für keine Frist. Die Frist gilt nur für Termine, die danach beginnen.</p>
 
   <div class="actions">
     <button {{ 'disabled' if not counts.neu }}>{{ counts.neu }} {{ 'Termin' if counts.neu == 1 else 'Termine' }} in DIVERA anlegen</button>

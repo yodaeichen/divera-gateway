@@ -1,4 +1,4 @@
-﻿Titel;Datum;Beginn;Ende;Ort;Beschreibung;Gruppen;ID
-Übungsdienst Atemschutz;14.01.2027;19:00;21:30;Gerätehaus;Belastungsübung, bitte Sportsachen mitbringen;;2027-001
-Jahreshauptversammlung;05.02.2027;20:00;;Dorfgemeinschaftshaus;Einladung folgt;;2027-002
-Zeltlager Jugendfeuerwehr;17.07.2027;;;Zeltplatz am See;Ganztägig, weil keine Uhrzeit angegeben ist;;2027-003
+﻿Titel;Datum;Beginn;Ende;Ort;Beschreibung;Gruppen;Erinnerung;Rückmeldung;ID
+Übungsdienst Atemschutz;14.01.2027;19:00;21:30;Gerätehaus;Belastungsübung, bitte Sportsachen mitbringen;;13.01.2027 18:00;ja;2027-001
+Jahreshauptversammlung;05.02.2027;20:00;;Dorfgemeinschaftshaus;Einladung folgt;;;freitext;2027-002
+Zeltlager Jugendfeuerwehr;17.07.2027;;;Zeltplatz am See;Ganztägig, weil keine Uhrzeit angegeben ist;;;;2027-003

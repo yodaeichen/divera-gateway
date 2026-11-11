@@ -581,6 +581,7 @@ with TestClient(app, base_url="http://testserver") as c:
     parsed_csv = events.parse_csv(CSV.encode("cp1252"), look)     # Excel-Kodierung
     rws = parsed_csv["rows"]
     assert not parsed_csv["error"] and len(rws) == 7 and events.parse_csv(CSV.encode("utf-8-sig"), look)["rows"] == rws
+    assert all(r["reminder_ts"] is None and r["response"] == "" for r in rws), "ohne die neuen Spalten bleibt alles leer"
     berlin = events.TZ
     assert rws[0]["ts_start"] == int(dt.datetime(2027, 1, 14, 19, 0, tzinfo=berlin).timestamp()) and rws[0]["when"] == "14.01.2027 19:00 bis 21:30"
     assert rws[0]["key"] == "2027-001" and rws[0]["address"] == "Gerätehaus" and not rws[0]["errors"] and not rws[0]["fullday"]
@@ -593,13 +594,37 @@ with TestClient(app, base_url="http://testserver") as c:
     assert comma["when"] == "01.03.2027 18:00 bis 20:00" and not comma["errors"]
     dup = events.parse_csv("Titel;Datum;ID\nA;01.03.2027;7\nB;02.03.2027;7\n".encode())["rows"]
     assert dup[1]["errors"] == ["kommt in der Datei doppelt vor"]
-    ev = events.build_event(rws[0], {"audience": "all", "push": False})
+    ev = events.build_event(rws[0], {"audience": "all"})
     assert ev == {"Event": {"foreign_id": "2027-001", "title": "Übungsdienst Atemschutz", "ts_start": rws[0]["ts_start"], "ts_end": rws[0]["ts_end"],
                             "fullday": False, "send_push": False, "send_sms": False, "send_call": False, "send_mail": False, "send_pager": False,
-                            "text": "Belastungsübung", "address": "Gerätehaus", "notification_type": 2}, "instructions": {}}, ev
-    ev2 = events.build_event(rws[1], {"audience": "persons", "ucr_ids": [501], "push": True, "reminder_hours": 24})
+                            "text": "Belastungsübung", "address": "Gerätehaus", "notification_type": 2, "response_type": 0}, "instructions": {}}, ev
+    at = lambda *a: int(dt.datetime(*a, tzinfo=berlin).timestamp())
+    assert events.stamp("2027-01-13T18:00") == at(2027, 1, 13, 18, 0) and events.stamp("") is None and events.stamp("quatsch") is None
+    BEFORE = {"reminder_mode": "before", "reminder_days": 1, "reminder_time": "18:30", "reminder_channels": ["push", "mail"]}
+    ev2 = events.build_event(rws[1], dict(BEFORE, audience="persons", ucr_ids=[501], channels=["push", "mail", "sms"]))
     assert ev2["Event"]["notification_type"] == 3 and ev2["Event"]["group"] == [12, 13] and "user_cluster_relation" not in ev2["Event"]
-    assert ev2["Reminder"] == {"ts": rws[1]["ts_start"] - 86400, "send_push": True, "send_mail": False} and ev2["Event"]["send_push"] is True
+    assert ev2["Reminder"] == {"ts": at(2027, 2, 4, 18, 30), "send_push": True, "send_mail": True}, ev2["Reminder"]
+    assert (ev2["Event"]["send_push"], ev2["Event"]["send_sms"], ev2["Event"]["send_mail"], ev2["Event"]["send_call"], ev2["Event"]["send_pager"]) == (True, True, True, False, False)
+    same_day = events.build_event(rws[0], dict(BEFORE, reminder_days=0, reminder_time="12:00", reminder_channels=["mail"]))
+    assert same_day["Reminder"] == {"ts": at(2027, 1, 14, 12, 0), "send_push": False, "send_mail": True}
+    assert "Reminder" not in events.build_event(rws[0], dict(BEFORE, reminder_days=0, reminder_time="19:00")), "Erinnerung nie zum oder nach dem Beginn"
+    fixed = {"reminder_mode": "fixed", "reminder_ts": at(2027, 1, 20, 9, 0), "reminder_channels": ["push"]}
+    assert "Reminder" not in events.build_event(rws[0], fixed) and events.build_event(rws[1], fixed)["Reminder"]["ts"] == at(2027, 1, 20, 9, 0)
+    assert "läge nicht vor dem Termin" in events.summary(rws[0], fixed, events.build_event(rws[0], fixed))["reminder"]
+    yes = events.build_event(rws[0], {"response": "yesno", "response_until": at(2027, 1, 10, 12, 0)})["Event"]
+    assert yes["response_type"] == 1 and "custom_answers" not in yes and yes["response_until"] is True and yes["ts_response"] == at(2027, 1, 10, 12, 0)
+    free = events.build_event(rws[0], {"response": "text", "response_until": at(2027, 2, 1, 12, 0)})["Event"]
+    assert free["response_type"] == 1 and free["custom_answers"] is True and "ts_response" not in free, "Frist nach dem Termin wird weggelassen"
+    CSV2 = ("Titel;Datum;Beginn;Erinnerung;Rückmeldung\nA;14.01.2027;19:00;13.01.2027 17:15;freitext\nB;14.01.2027;19:00;12.01.2027;nein\n"
+            "C;14.01.2027;19:00;15.01.2027 10:00;ja\nD;14.01.2027;19:00;18:00;vielleicht\n")
+    own = events.parse_csv(CSV2.encode())["rows"]
+    assert own[0]["reminder_ts"] == at(2027, 1, 13, 17, 15) and own[0]["response"] == "text" and own[1]["reminder_ts"] == at(2027, 1, 12, 18, 0) and own[1]["response"] == "none"
+    assert own[2]["errors"] == ["Erinnerung liegt nicht vor dem Termin"] and len(own[3]["errors"]) == 2
+    mixed = events.build_event(own[0], dict(BEFORE, response="none"))   # Angaben der Zeile gehen vor
+    assert mixed["Reminder"]["ts"] == at(2027, 1, 13, 17, 15) and mixed["Event"]["custom_answers"] is True
+    assert events.build_event(own[1], {"response": "text"})["Event"]["response_type"] == 0
+    info = events.summary(own[0], {"channels": ["push", "sms"]}, events.build_event(own[0], {"channels": ["push", "sms"]}))
+    assert info == {"audience": "alle", "channels": "Push-Nachricht, SMS", "reminder": "13.01.2027 17:15", "response": "ja / nein und Freitext"}, info
     ev3 = events.build_event(rws[0], {"audience": "persons", "ucr_ids": [501]})
     assert ev3["Event"]["notification_type"] == 4 and ev3["Event"]["user_cluster_relation"] == [501] and ev3["instructions"] == {"user_cluster_relation": {"mapping": "id"}}
 
@@ -621,11 +646,19 @@ with TestClient(app, base_url="http://testserver") as c:
         return (False, "HTTP 500: kaputt") if payload["Event"]["title"] == "Zeltlager" else (True, 'HTTP 200: {"success":true}')
     real_event_send, events.send_event = events.send_event, fake_send
     assert "mindestens eine Person ankreuzen" in c.post("/events/batch/1/import", data={"csrf": tok, "audience": "persons"}).text and not posted
-    res = c.post("/events/batch/1/import", data={"csrf": tok, "audience": "persons", "ucr": ["501"], "reminder_hours": "24"})
+    assert "Datum und Uhrzeit wählen" in c.post("/events/batch/1/import", data={"csrf": tok, "reminder_mode": "fixed", "reminder_channel": ["push"]}).text
+    assert "wie erinnert werden soll" in c.post("/events/batch/1/import", data={"csrf": tok, "reminder_mode": "before"}).text and not posted
+    assert 'type="datetime-local" name="reminder_at"' in prev.text and 'name="channel" value="sms"' in prev.text and 'name="response" value="text"' in prev.text
+    res = c.post("/events/batch/1/import", data={"csrf": tok, "audience": "persons", "ucr": ["501"], "reminder_mode": "before", "reminder_days": "1",
+                                                 "reminder_time": "18:00", "reminder_channel": ["push", "mail"], "channel": ["mail", "boese"],
+                                                 "response": "text", "response_until": "2027-01-10T12:00"})
+    assert "ja / nein und Freitext, bis 10.01.2027 12:00" in res.text and "13.01.2027 18:00" in res.text and ">E-Mail<" in res.text
     assert "3 Termine in DIVERA angelegt" in res.text and "1 fehlgeschlagen" in res.text and "HTTP 500: kaputt" in res.text
     assert [p[0] for p in posted] == ["persoenlich456"] * 4 and len(posted) == 4, "nur die fehlerfreien Zeilen, mit dem persönlichen Schlüssel"
     assert posted[0][1]["Event"]["user_cluster_relation"] == [501] and posted[1][1]["Event"]["group"] == [12, 13] and posted[0][1]["Event"]["send_push"] is False
-    assert posted[0][1]["Reminder"]["ts"] == rws[0]["ts_start"] - 86400
+    assert posted[0][1]["Reminder"] == {"ts": at(2027, 1, 13, 18, 0), "send_push": True, "send_mail": True}
+    assert posted[0][1]["Event"]["send_mail"] is True and posted[0][1]["Event"]["send_sms"] is False and posted[0][1]["Event"]["custom_answers"] is True
+    assert posted[0][1]["Event"]["ts_response"] == at(2027, 1, 10, 12, 0)
     with m.SessionLocal() as db:
         assert {e.key for e in db.query(m.ImportedEvent)} == {"2027-001", "2027-002", rws[3]["key"]} and db.query(m.ImportBatch).count() == 1
     again_prev = c.get("/events/batch/1").text
@@ -634,6 +667,7 @@ with TestClient(app, base_url="http://testserver") as c:
     events.send_event = lambda key, payload: posted.append(payload) or (True, "HTTP 200: ok")
     assert "1 Termin in DIVERA angelegt" in c.post("/events/batch/1/import", data={"csrf": tok}).text and len(posted) == 1
     assert posted[0]["Event"]["title"] == "Zeltlager" and posted[0]["Event"]["notification_type"] == 2 and "Reminder" not in posted[0]
+    assert posted[0]["Event"]["response_type"] == 0 and posted[0]["Event"]["send_push"] is False
     with m.SessionLocal() as db:
         assert db.query(m.ImportBatch).count() == 0 and db.query(m.ImportedEvent).count() == 4, "erledigte Datei wird gelöscht"
     assert c.get("/events/batch/1").status_code == 404

@@ -27,6 +27,8 @@
     <tr><td><strong>Ort</strong></td><td>nein</td><td>Treffpunkt oder Adresse</td><td class="detail">{{ columns.address|join(', ') }}</td></tr>
     <tr><td><strong>Beschreibung</strong></td><td>nein</td><td>Weitere Informationen</td><td class="detail">{{ columns.text|join(', ') }}</td></tr>
     <tr><td><strong>Gruppen</strong></td><td>nein</td><td>Namen von DIVERA-Gruppen, mehrere mit Semikolon oder Komma. Nur diese Gruppen sehen den Termin. Die Namen müssen zur geladenen Empfängerliste passen.</td><td class="detail">{{ columns.groups|join(', ') }}</td></tr>
+    <tr><td><strong>Erinnerung</strong></td><td>nein</td><td>Eigener Zeitpunkt der Erinnerung für diesen Termin, z. B. <code>13.01.2027 18:00</code>. Ohne Uhrzeit gilt 18:00.</td><td class="detail">{{ columns.reminder|join(', ') }}</td></tr>
+    <tr><td><strong>Rückmeldung</strong></td><td>nein</td><td><code>ja</code> für Zusage oder Absage, <code>freitext</code> für zusätzlich eigene Antworten, <code>nein</code> für keine</td><td class="detail">{{ columns.response|join(', ') }}</td></tr>
     <tr><td><strong>ID</strong></td><td>nein</td><td>Eigene Kennung je Termin. Daran erkennt das Gateway, was schon importiert wurde. Ohne ID gelten Titel, Beginn und Ende zusammen als Kennung.</td><td class="detail">{{ columns.id|join(', ') }}</td></tr>
   </table>
 </div>

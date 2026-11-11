@@ -2,6 +2,13 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.24.0
+
+- Terminimport: Benachrichtigung über mehrere Wege wählbar (Push, SMS, Sprachanruf, E-Mail, Pager)
+- Erinnerung wahlweise „Tage vorher um Uhrzeit" oder zu einem festen Zeitpunkt aus dem Kalender, per Push und/oder E-Mail
+- Rückmeldung je Termin: keine, Zusage oder Absage, zusätzlich Freitext, mit optionaler Frist
+- Neue CSV-Spalten „Erinnerung" und „Rückmeldung" für Angaben je Termin
+
 ## 1.23.0
 
 - Termine aus einer CSV-Datei in DIVERA anlegen: Hochladen, Vorschau mit Prüfung jeder Zeile, Import nach Bestätigung

@@ -27,9 +27,16 @@ COLUMNS = {
     "fullday": ("ganztägig", "ganztaegig", "ganztags", "ganztag", "fullday"),
     "groups": ("gruppen", "gruppe", "group", "groups", "empfänger", "empfaenger"),
     "id": ("id", "nummer", "nr", "nr.", "foreign_id", "kennung"),
+    "reminder": ("erinnerung", "erinnern", "reminder"),
+    "response": ("rückmeldung", "rueckmeldung", "antwort", "zusage", "response"),
 }
+CHANNELS = [("push", "Push-Nachricht in der App"), ("sms", "SMS"), ("call", "Sprachanruf"), ("mail", "E-Mail"), ("pager", "Pager")]
+REMINDER_CHANNELS = [("push", "Push-Nachricht in der App"), ("mail", "E-Mail")]
+RESPONSES = [("none", "Keine Rückmeldung"), ("yesno", "Zusage oder Absage (ja / nein)"), ("text", "Zusage oder Absage, zusätzlich eigene Antwort als Freitext")]
+_RESPONSE_WORDS = {"": "", "nein": "none", "keine": "none", "n": "none", "0": "none", "ja": "yesno", "j": "yesno", "x": "yesno", "1": "yesno",
+                   "ja/nein": "yesno", "zusage": "yesno", "freitext": "text", "text": "text", "ja/nein/freitext": "text", "antwort": "text"}
 LABELS = {"title": "Titel", "text": "Beschreibung", "address": "Ort", "date": "Datum", "start": "Beginn", "end": "Ende",
-          "enddate": "Enddatum", "fullday": "Ganztägig", "groups": "Gruppen", "id": "ID"}
+          "enddate": "Enddatum", "fullday": "Ganztägig", "groups": "Gruppen", "id": "ID", "reminder": "Erinnerung", "response": "Rückmeldung"}
 _DATE_FORMATS = ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y")
 _TRUE = {"ja", "j", "x", "1", "true", "wahr", "yes", "y"}
 
@@ -152,6 +159,22 @@ def parse_csv(raw: bytes, group_lookup: dict[str, int] | None = None) -> dict:
             else:
                 group_ids.append(ident)
 
+        # eigene Erinnerung und eigene Rückmeldung je Zeile (gehen vor der Auswahl beim Import)
+        reminder_ts = None
+        rem_day, rem_clock, problem5 = split_datetime(cell("reminder"))
+        if problem5:
+            errors.append(problem5)
+        elif rem_day and start:
+            reminder_ts = int(dt.datetime.combine(rem_day, rem_clock or dt.time(18, 0), TZ).timestamp())
+            if reminder_ts >= int(start.timestamp()):
+                errors.append("Erinnerung liegt nicht vor dem Termin")
+        elif rem_clock and not rem_day:
+            errors.append("Erinnerung braucht ein Datum, nicht nur eine Uhrzeit")
+        response = _RESPONSE_WORDS.get(cell("response").lower())
+        if response is None:
+            errors.append(f"Rückmeldung „{cell('response')}“ nicht erkannt (möglich: ja, nein, freitext)")
+            response = ""
+
         key = cell("id")[:80]
         if not key and title and start:
             key = "gw-" + hashlib.sha1(f"{title}|{int(start.timestamp())}|{int(end.timestamp())}".encode()).hexdigest()[:16]
@@ -162,6 +185,7 @@ def parse_csv(raw: bytes, group_lookup: dict[str, int] | None = None) -> dict:
             "line": line, "key": key, "title": title[:100], "text": cell("text")[:5000], "address": cell("address")[:200],
             "fullday": fullday, "ts_start": int(start.timestamp()) if start else None, "ts_end": int(end.timestamp()) if end else None,
             "when": describe(start, end, fullday) if start and end else "", "groups": names, "group_ids": group_ids,
+            "reminder_ts": reminder_ts, "response": response,
             "errors": errors, "notes": notes,
         })
     if not rows:
@@ -179,16 +203,53 @@ def describe(start: dt.datetime, end: dt.datetime, fullday: bool) -> str:
     return start.strftime("%d.%m.%Y %H:%M") + " bis " + end.strftime("%d.%m.%Y %H:%M")
 
 
+def stamp(value: str) -> int | None:
+    """Wandelt die Eingabe eines Datum-Uhrzeit-Feldes (2027-01-13T18:00) in einen Zeitstempel um."""
+    try:
+        return int(dt.datetime.fromisoformat(str(value)).replace(tzinfo=TZ).timestamp())
+    except (TypeError, ValueError):
+        return None
+
+
+def show(ts: int | None) -> str:
+    return dt.datetime.fromtimestamp(ts, TZ).strftime("%d.%m.%Y %H:%M") if ts else ""
+
+
+def reminder_for(row: dict, options: dict) -> tuple[int | None, str]:
+    """Zeitpunkt der Erinnerung für einen Termin. Zweiter Wert: Hinweis, falls keine gesetzt werden kann.
+
+    Reihenfolge: Spalte „Erinnerung" der Zeile, sonst die Auswahl beim Import
+    (reminder_mode "fixed" mit reminder_ts oder "before" mit reminder_days und reminder_time).
+    """
+    if row.get("reminder_ts"):
+        return row["reminder_ts"], ""
+    mode, ts = options.get("reminder_mode"), None
+    if mode == "fixed":
+        ts = options.get("reminder_ts")
+    elif mode == "before":
+        start = dt.datetime.fromtimestamp(row["ts_start"], TZ)
+        hour, minute = (int(x) for x in (options.get("reminder_time") or "18:00").split(":")[:2])
+        ts = int(dt.datetime.combine(start.date() - dt.timedelta(days=int(options.get("reminder_days") or 0)), dt.time(hour, minute), TZ).timestamp())
+    if not ts:
+        return None, ""
+    if ts >= row["ts_start"]:
+        return None, "keine Erinnerung, der Zeitpunkt läge nicht vor dem Termin"
+    return ts, ""
+
+
 def build_event(row: dict, options: dict) -> dict:
     """Baut den JSON-Inhalt für POST api/v2/events.
 
-    options: audience ("all" | "groups" | "persons"), group_ids, ucr_ids, push (bool), reminder_hours (int, 0 = keine).
-    Stehen in der Zeile eigene Gruppen, gehen sie vor.
+    options: audience ("all" | "groups" | "persons"), group_ids, ucr_ids, channels (Liste aus push/sms/call/mail/pager),
+    reminder_mode/reminder_ts/reminder_days/reminder_time, reminder_channels (push/mail),
+    response ("none" | "yesno" | "text"), response_until (Zeitstempel oder None).
+    Angaben in der Zeile (Gruppen, Erinnerung, Rückmeldung) gehen vor.
     """
+    channels = set(options.get("channels") or [])
     event: dict = {
         "foreign_id": row["key"], "title": row["title"], "ts_start": row["ts_start"], "ts_end": row["ts_end"],
-        "fullday": bool(row["fullday"]), "send_push": bool(options.get("push")),
-        "send_sms": False, "send_call": False, "send_mail": False, "send_pager": False,
+        "fullday": bool(row["fullday"]),
+        **{f"send_{name}": name in channels for name, _ in CHANNELS},
     }
     if row["text"]:
         event["text"] = row["text"]
@@ -206,11 +267,32 @@ def build_event(row: dict, options: dict) -> dict:
         instructions["group"] = {"mapping": "id"}
     else:
         event["notification_type"] = 2
+    # Rückmeldung: die Bedeutung der Werte ist in der DIVERA-Dokumentation nicht erklärt (Annahme: 0 = keine, 1 = Zu-/Absage)
+    response = row.get("response") or options.get("response") or "none"
+    event["response_type"] = 0 if response == "none" else 1
+    if response == "text":
+        event["custom_answers"] = True
+    if response != "none" and options.get("response_until") and options["response_until"] < row["ts_start"]:
+        event["response_until"], event["ts_response"] = True, options["response_until"]
     payload: dict = {"Event": event, "instructions": instructions}
-    hours = int(options.get("reminder_hours") or 0)
-    if hours > 0:
-        payload["Reminder"] = {"ts": row["ts_start"] - hours * 3600, "send_push": True, "send_mail": False}
+    reminder_ts, _ = reminder_for(row, options)
+    if reminder_ts:
+        chosen = set(options.get("reminder_channels") or ["push"])
+        payload["Reminder"] = {"ts": reminder_ts, "send_push": "push" in chosen, "send_mail": "mail" in chosen}
     return payload
+
+
+def summary(row: dict, options: dict, payload: dict) -> dict:
+    """Kurzfassung für Vorschau und Ergebnis: wer, wie benachrichtigt, Erinnerung, Rückmeldung."""
+    event = payload["Event"]
+    names = dict(CHANNELS)
+    sent = [names[n].split(" ")[0] for n, _ in CHANNELS if event.get(f"send_{n}")]
+    reminder_ts, reminder_note = reminder_for(row, options)
+    response = "keine" if event["response_type"] == 0 else ("ja / nein" + (" und Freitext" if event.get("custom_answers") else ""))
+    if event.get("response_until"):
+        response += f", bis {show(event['ts_response'])}"
+    return {"audience": audience_of(payload), "channels": ", ".join(sent) or "keine", "reminder": show(reminder_ts) or reminder_note or "keine",
+            "response": response}
 
 
 def audience_of(payload: dict) -> str:

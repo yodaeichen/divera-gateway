@@ -228,7 +228,11 @@ Auf der Seite einer Löschgruppe führt „Termine aus CSV importieren" zum Impo
 1. Vorlage herunterladen oder eine eigene Tabelle als CSV speichern. Pflicht sind die Spalten **Titel** und **Datum**
    (oder **Beginn** mit Datum und Uhrzeit); möglich sind außerdem Ende, Enddatum, Ganztägig, Ort, Beschreibung, Gruppen und ID.
 2. Datei hochladen. Die Vorschau zeigt jeden Termin mit Zustand: neu, schon importiert oder fehlerhaft mit Grund.
-3. Empfänger wählen (alle, Gruppen oder Personen), Push und Erinnerung festlegen und den Import bestätigen.
+3. Empfänger wählen (alle, Gruppen oder Personen) und festlegen: Benachrichtigung beim Anlegen (Push, SMS, Sprachanruf,
+   E-Mail, Pager), Erinnerung (Tage vorher um eine Uhrzeit oder fester Zeitpunkt, per Push und/oder E-Mail) und
+   Rückmeldung (keine, Zusage oder Absage, zusätzlich Freitext, optional mit Frist). Dann den Import bestätigen.
+
+Die Spalten **Erinnerung** und **Rückmeldung** in der Datei setzen diese Angaben je Termin und gehen der Auswahl vor.
 
 Das Gateway merkt sich angelegte Termine über die Spalte ID, ersatzweise über Titel, Beginn und Ende. Ein erneuter
 Import derselben Datei legt nur neue Zeilen an; vorhandene Termine werden nicht geändert. Der Import nutzt die

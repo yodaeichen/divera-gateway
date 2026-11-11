@@ -441,7 +441,8 @@ def events_preview(bid: int, request: Request, db: Session = Depends(get_db), us
     rows = json.loads(batch.rows)
     counts = mark_rows(db, tenant, rows)
     return page(request, "events_preview.html", user, tenant=tenant, batch=batch, rows=rows, counts=counts,
-                directory=directory_of(tenant), own_groups=any(r["group_ids"] for r in rows), results=None)
+                directory=directory_of(tenant), own_groups=any(r["group_ids"] for r in rows), results=None, ev=events,
+                own_reminder=any(r.get("reminder_ts") for r in rows), own_response=any(r.get("response") for r in rows))
 
 
 def _import_rows(accesskey: str, rows: list[dict], options: dict) -> list[dict]:
@@ -450,7 +451,7 @@ def _import_rows(accesskey: str, rows: list[dict], options: dict) -> list[dict]:
     for row in rows:
         payload = events.build_event(row, options)
         ok, detail = events.send_event(accesskey, payload)
-        results.append({"row": row, "ok": ok, "detail": detail, "audience": events.audience_of(payload)})
+        results.append({"row": row, "ok": ok, "detail": detail, "info": events.summary(row, options, payload)})
         if not ok and re.match(r"HTTP 40[13]\b", detail):
             break
         time.sleep(0.2)
@@ -465,9 +466,16 @@ async def events_import(bid: int, request: Request, db: Session = Depends(get_db
     counts = mark_rows(db, tenant, rows)
     todo = [r for r in rows if r["state"] == "neu"]
     audience = form.get("audience") if form.get("audience") in ("groups", "persons") else "all"
-    options = {"audience": audience, "push": "push" in form,
+    known_channels = {name for name, _ in events.CHANNELS}
+    mode = form.get("reminder_mode") if form.get("reminder_mode") in ("fixed", "before") else "none"
+    options = {"audience": audience, "channels": [c for c in form.getlist("channel") if c in known_channels],
                "group_ids": [int(i) for i in rules.id_list(form.getlist("grp"))], "ucr_ids": [int(i) for i in rules.id_list(form.getlist("ucr"))],
-               "reminder_hours": int(form.get("reminder_hours")) if str(form.get("reminder_hours", "")).isdigit() else 0}
+               "reminder_mode": mode, "reminder_ts": events.stamp(form.get("reminder_at")),
+               "reminder_days": int(form.get("reminder_days")) if str(form.get("reminder_days", "")).isdigit() else 1,
+               "reminder_time": text(form, "reminder_time", 5) if re.fullmatch(r"\d{2}:\d{2}", text(form, "reminder_time", 5)) else "18:00",
+               "reminder_channels": [c for c in form.getlist("reminder_channel") if c in ("push", "mail")],
+               "response": form.get("response") if form.get("response") in ("yesno", "text") else "none",
+               "response_until": events.stamp(form.get("response_until"))}
     problem = ""
     if not todo:
         problem = "In dieser Datei ist kein neuer Termin zum Anlegen."
@@ -475,6 +483,10 @@ async def events_import(bid: int, request: Request, db: Session = Depends(get_db
         problem = "Bitte mindestens eine Gruppe ankreuzen oder „alle Mitglieder“ wählen."
     elif audience == "persons" and not options["ucr_ids"]:
         problem = "Bitte mindestens eine Person ankreuzen oder „alle Mitglieder“ wählen."
+    elif mode == "fixed" and not options["reminder_ts"]:
+        problem = "Für die Erinnerung zu einem festen Zeitpunkt bitte Datum und Uhrzeit wählen."
+    elif mode != "none" and not options["reminder_channels"]:
+        problem = "Bitte wählen, wie erinnert werden soll (Push oder E-Mail), oder „keine Erinnerung“ wählen."
     if problem:
         flash(request, problem, "err")
         return go(f"/events/batch/{bid}")
@@ -494,7 +506,7 @@ async def events_import(bid: int, request: Request, db: Session = Depends(get_db
         db.delete(batch)  # erledigt; die Datei wird nicht länger aufbewahrt
     db.commit()
     return page(request, "events_preview.html", user, tenant=tenant, batch=batch, rows=rows, counts=counts, directory=directory_of(tenant),
-                own_groups=False, results=results, created=len(created), failed=len(failed), skipped=skipped, hint=hint)
+                own_groups=False, own_reminder=False, own_response=False, ev=events, results=results, created=len(created), failed=len(failed), skipped=skipped, hint=hint)
 
 
 # ---------- Quellen ----------
