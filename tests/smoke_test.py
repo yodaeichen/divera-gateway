@@ -463,6 +463,100 @@ with TestClient(app, base_url="http://testserver") as c:
     assert g.get("/logs").status_code == 403 and g.get(f"/rules/{other_rule}/edit").status_code == 200
     assert "Protokoll dieses Kunden" not in g.get("/tenants/2").text
 
+    # ---------- E-Mail-Adresse und Einladung ----------
+    from app import mailer
+    assert e.get("/settings").status_code == 403 and e.post("/settings", data={"csrf": et}).status_code == 403
+    assert mailer.valid_address("a.b@wehr.example") and not mailer.valid_address("a@b") and not mailer.valid_address("a@b.de\nBcc: x@y.de")
+    assert not mailer.valid_address("Name <a@b.de>") and not mailer.valid_address("a@b.de, c@d.de")
+    NEWU = dict(VIEW, tenant=["1"])
+    assert "noch nicht eingerichtet" in c.get("/users/new").text and "nicht eingerichtet" in c.get("/settings").text
+    assert "noch nicht eingerichtet" in c.post("/users/save", data=dict(NEWU, username="neu1", email="neu1@wehr.example", send_invite="on")).text
+    assert "Passwort vergeben oder die Einladung" in c.post("/users/save", data=dict(NEWU, username="neu1", email="neu1@wehr.example")).text
+    assert "Absenderadresse ist ungültig" in c.post("/settings", data={"csrf": tok, "smtp_host": "mail.example", "mail_from": "kaputt"}).text
+    assert "http:// oder https://" in c.post("/settings", data={"csrf": tok, "smtp_host": "mail.example", "mail_from": "gw@wehr.example", "base_url": "gateway"}).text
+    SMTP = {"csrf": tok, "smtp_host": "mail.wehr.example", "smtp_port": "", "smtp_security": "starttls", "smtp_user": "gw", "smtp_password": "smtp-geheim",
+            "mail_from": "gw@wehr.example", "base_url": "https://gw.wehr.example"}
+    saved_page = c.post("/settings", data=SMTP).text
+    assert "Einstellungen gespeichert" in saved_page and "eingerichtet" in saved_page and "smtp-geheim" not in saved_page
+    with m.SessionLocal() as db:
+        assert "smtp-geheim" not in db.get(m.Setting, "smtp_password").value and mailer.load(db)["smtp_password"] == "smtp-geheim"
+    c.post("/settings", data={k: v for k, v in SMTP.items() if k != "smtp_password"})
+    with m.SessionLocal() as db:
+        assert mailer.load(db)["smtp_password"] == "smtp-geheim", "leeres Passwortfeld behält das gespeicherte"
+
+    # echter Versandweg gegen einen nachgebildeten Mailserver
+    import smtplib
+    class FakeSMTP:
+        calls = []
+        def __init__(self, host, port, timeout=None): FakeSMTP.calls.append(("connect", host, port))
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self, context=None): FakeSMTP.calls.append(("starttls",))
+        def login(self, user, password): FakeSMTP.calls.append(("login", user, password))
+        def send_message(self, msg): FakeSMTP.calls.append(("send", msg["From"], msg["To"], msg["Subject"], msg.get_content()))
+    real_smtp, smtplib.SMTP = smtplib.SMTP, FakeSMTP
+    r = c.post("/settings", data=dict(SMTP, send_test="1", test_to="admin@wehr.example"))
+    assert "Testnachricht an admin@wehr.example verschickt" in r.text
+    assert FakeSMTP.calls[:3] == [("connect", "mail.wehr.example", 587), ("starttls",), ("login", "gw", "smtp-geheim")]
+    assert FakeSMTP.calls[3][1:4] == ("DIVERA Gateway <gw@wehr.example>", "admin@wehr.example", "Testnachricht vom DIVERA Gateway")
+    class BadSMTP(FakeSMTP):
+        def login(self, user, password): raise smtplib.SMTPAuthenticationError(535, b"nein")
+    smtplib.SMTP = BadSMTP
+    assert "Benutzername oder Passwort abgelehnt" in c.post("/settings", data=dict(SMTP, send_test="1", test_to="admin@wehr.example")).text
+    smtplib.SMTP = real_smtp
+
+    outbox = []
+    real_deliver = mailer.deliver
+    mailer.deliver = lambda settings, to, subject, body: outbox.append((to, subject, body))
+    assert "ungültig" in c.post("/users/save", data=dict(NEWU, username="neu1", email="kein-at", send_invite="on")).text
+    assert "fehlt die E-Mail-Adresse" in c.post("/users/save", data=dict(NEWU, username="neu1", send_invite="on")).text
+    r = c.post("/users/save", data=dict(NEWU, username="neu1", email="neu1@wehr.example", send_invite="on"))
+    assert "Die Einladung wurde an neu1@wehr.example geschickt" in r.text and "Einladung offen" in r.text and len(outbox) == 1
+    to, subject, mailbody = outbox[0]
+    assert to == "neu1@wehr.example" and "Benutzername: neu1" in mailbody and "admin hat für dich" in mailbody and "48 Stunden" in mailbody
+    link = re.search(r"https://gw\.wehr\.example/invite/([\w-]+)", mailbody)
+    assert link and "Passwort:" not in mailbody, "die Mail enthält einen Link, kein Passwort"
+    token1 = link.group(1)
+    with m.SessionLocal() as db:
+        neu1 = db.query(m.User).filter_by(username="neu1").one()
+        assert neu1.invite_hash and token1 not in neu1.invite_hash and neu1.email == "neu1@wehr.example"; neu1_id = neu1.id
+    pub = TestClient(app, base_url="http://testserver")          # nicht angemeldet
+    inv = pub.get(f"/invite/{token1}").text
+    assert "Hallo <strong>neu1</strong>" in inv and "ungültig oder abgelaufen" in pub.get("/invite/falsch").text
+    pt = csrf(inv)
+    assert pub.post(f"/invite/{token1}", data={"password": "ein-neues-passwort", "repeat": "ein-neues-passwort"}).status_code == 403
+    assert "beide Eingaben müssen gleich sein" in pub.post(f"/invite/{token1}", data={"csrf": pt, "password": "ein-neues-passwort", "repeat": "anders-anders-12"}).text
+    assert "mindestens 12" in pub.post(f"/invite/{token1}", data={"csrf": pt, "password": "kurz", "repeat": "kurz"}).text
+    done_inv = pub.post(f"/invite/{token1}", data={"csrf": pt, "password": "ein-neues-passwort", "repeat": "ein-neues-passwort"}).text
+    assert "Passwort gespeichert" in done_inv
+    assert "ungültig oder abgelaufen" in pub.get(f"/invite/{token1}").text, "Link funktioniert nur einmal"
+    n1, n1t, n1home = login("neu1", "ein-neues-passwort")
+    assert "FF Musterstadt" in n1home and "Andere Wehr" not in n1home and ">Einstellungen<" not in n1home
+    assert "Einladung offen" not in c.get("/users").text
+
+    # erneut senden macht den alten Link ungültig; abgelaufene Links gelten nicht
+    assert "Link an neu1@wehr.example senden" in c.get(f"/users/{neu1_id}/edit").text
+    c.post(f"/users/{neu1_id}/invite", data={"csrf": tok}); token2 = re.search(r"/invite/([\w-]+)", outbox[-1][2]).group(1)
+    r = c.post(f"/users/{neu1_id}/invite", data={"csrf": tok}); token3 = re.search(r"/invite/([\w-]+)", outbox[-1][2]).group(1)
+    assert "Link zum Festlegen des Passworts an neu1@wehr.example geschickt" in r.text and token2 != token3
+    assert "ungültig oder abgelaufen" in pub.get(f"/invite/{token2}").text and "Hallo" in pub.get(f"/invite/{token3}").text
+    assert "FF Musterstadt" in login("neu1", "ein-neues-passwort")[2], "altes Passwort bleibt gültig, bis ein neues gesetzt ist"
+    with m.SessionLocal() as db:
+        db.get(m.User, neu1_id).invite_expires = m.utcnow() - dt.timedelta(minutes=1); db.commit()
+    assert "ungültig oder abgelaufen" in pub.get(f"/invite/{token3}").text
+    assert n1.post(f"/users/{neu1_id}/invite", data={"csrf": n1t}).status_code == 403
+
+    # Versand scheitert: Benutzer bleibt angelegt, Meldung nennt den Grund
+    mailer.deliver = lambda *a: (_ for _ in ()).throw(RuntimeError("Der Mailserver hat die Empfängeradresse abgelehnt."))
+    r = c.post("/users/save", data=dict(NEWU, username="neu2", email="neu2@wehr.example", send_invite="on"))
+    assert "gespeichert, aber die Einladung ging nicht raus" in r.text and "Empfängeradresse abgelehnt" in r.text
+    with m.SessionLocal() as db:
+        assert db.query(m.User).filter_by(username="neu2").count() == 1
+    mailer.deliver = real_deliver
+    # ohne Einladung weiterhin mit festem Passwort
+    c.post("/users/save", data=dict(NEWU, username="neu3", password="festes-passwort-1", email="neu3@wehr.example"))
+    assert "FF Musterstadt" in login("neu3", "festes-passwort-1")[2] and len(outbox) == 3
+
     # Rechte wirken sofort, auch in laufenden Sitzungen
     c.post("/users/save", data=dict(VIEW, id=str(leser_id), p_rules="0", tenant=["2"]))
     assert v.get("/tenants/1").status_code == 404 and v.get(f"/rules/{other_rule}/edit").status_code == 403

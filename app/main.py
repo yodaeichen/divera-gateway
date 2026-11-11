@@ -1,6 +1,7 @@
 """Web-Oberfläche und Webhook-Eingang."""
 import asyncio
 import datetime as dt
+import hashlib
 import hmac
 import json
 import logging
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as m
-from . import access, rules, sources, suggest, worker
+from . import access, mailer, rules, sources, suggest, worker
 from . import security as sec
 from .version import VERSION
 
@@ -739,7 +740,35 @@ def admins_left(db: Session) -> int:
     return sum(1 for u in db.scalars(select(m.User)) if access.perms_of(u)["users"] == 2)
 
 
+def public_url(request: Request, settings: dict) -> str:
+    """Adresse, unter der Benutzer das Gateway erreichen: aus den Einstellungen, sonst aus dem aktuellen Aufruf."""
+    return (settings.get("base_url") or str(request.base_url)).rstrip("/") + "/"
+
+
+def start_invite(target: m.User) -> str:
+    """Erzeugt einen Einmal-Link-Schlüssel. Gespeichert wird nur sein Hash."""
+    token = secrets.token_urlsafe(32)
+    target.invite_hash = hashlib.sha256(token.encode()).hexdigest()
+    target.invite_expires = m.utcnow() + dt.timedelta(hours=mailer.INVITE_HOURS)
+    return token
+
+
+async def send_invite(request: Request, db: Session, target: m.User, inviter: m.User) -> str:
+    """Schickt die Einladung. Gibt '' zurück oder eine Fehlermeldung; der Benutzer bleibt in jedem Fall angelegt."""
+    settings = mailer.load(db)
+    token = start_invite(target)
+    db.commit()
+    base = public_url(request, settings)
+    subject, body = mailer.invite_text(target.username, f"{base}invite/{token}", base, inviter.username)
+    try:
+        await asyncio.to_thread(mailer.deliver, settings, target.email, subject, body)
+    except RuntimeError as exc:
+        return str(exc)
+    return ""
+
+
 def user_form_page(request, user, db, target, **extra):
+    extra.setdefault("mail_ready", mailer.configured(mailer.load(db)))
     perms = access.perms_of(target) if target is not None and target.id else dict(access.PRESETS["viewer"])
     return page(request, "user_form.html", user, target=target, tperms=perms, areas=access.AREAS, presets=access.PRESETS,
                 role_names=access.ROLE_NAMES, role_hints=access.ROLE_HINTS, send_hint=access.SEND_HINT,
@@ -751,7 +780,9 @@ def user_form_page(request, user, db, target, **extra):
 @app.get("/users")
 def users_view(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
     names = {t.id: t.name for t in db.scalars(select(m.Tenant))}
+    now = m.utcnow()
     rows = [{"user": u, "role": access.role_of(u), "all": access.sees_all(u),
+             "pending": bool(u.invite_hash and u.invite_expires and u.invite_expires > now and not u.last_login),
              "tenants": [names[i] for i in sorted(access.tenant_ids(u)) if i in names]}
             for u in db.scalars(select(m.User).order_by(m.User.username))]
     return page(request, "users.html", user, rows=rows)
@@ -771,22 +802,36 @@ def users_edit(uid: int, request: Request, db: Session = Depends(get_db), user: 
 async def users_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
     form = await read_form(request)
     password = str(form.get("password", ""))
+    email = text(form, "email", 200)
+    invite = "send_invite" in form
     target = need(db.get(m.User, int(form["id"]))) if form.get("id") else None
     back = f"/users/{target.id}/edit" if target else "/users/new"
-    if target is None:
+    if email and not mailer.valid_address(email):
+        flash(request, "Die E-Mail-Adresse ist ungültig.", "err")
+        return go(back)
+    if invite and not email:
+        flash(request, "Für die Einladung per E-Mail fehlt die E-Mail-Adresse.", "err")
+        return go(back)
+    if invite and not mailer.configured(mailer.load(db)):
+        flash(request, "Der E-Mail-Versand ist noch nicht eingerichtet. Bitte zuerst unter „Einstellungen“ eintragen.", "err")
+        return go(back)
+    if password and len(password) < 12:
+        flash(request, "Das Passwort braucht mindestens 12 Zeichen." + (" Leer lassen, um es nicht zu ändern." if target else ""), "err")
+        return go(back)
+    created = target is None
+    if created:
         username = text(form, "username", 80)
         if not username or db.scalar(select(m.User).where(m.User.username == username)):
             flash(request, "Benutzername fehlt oder ist schon vergeben.", "err")
             return go(back)
-        if len(password) < 12:
-            flash(request, "Das Passwort braucht mindestens 12 Zeichen.", "err")
+        if not password and not invite:
+            flash(request, "Bitte ein Passwort vergeben oder die Einladung per E-Mail ankreuzen.", "err")
             return go(back)
-        target = m.User(username=username)
-    elif password and len(password) < 12:
-        flash(request, "Das Passwort braucht mindestens 12 Zeichen. Leer lassen, um es nicht zu ändern.", "err")
-        return go(back)
-    if password:
+        # ohne eigenes Passwort bekommt das Konto ein zufälliges, das niemand kennt; es wird über den Einladungslink ersetzt
+        target = m.User(username=username, password_hash=sec.hash_password(password or secrets.token_urlsafe(32)))
+    elif password:
         target.password_hash = sec.hash_password(password)
+    target.email = email
     perms, everything, ids = access.from_form(form)
     target.perms, target.all_tenants, target.tenant_ids = json.dumps(perms), everything, ids
     db.add(target)
@@ -796,8 +841,100 @@ async def users_save(request: Request, db: Session = Depends(get_db), user: m.Us
         flash(request, "Nicht gespeichert: Es muss mindestens ein Benutzer übrig bleiben, der Benutzer und Rechte verwalten darf.", "err")
         return go(back)
     db.commit()
-    flash(request, f"Benutzer {target.username} gespeichert.")
+    if invite:
+        problem = await send_invite(request, db, target, user)
+        if problem:
+            flash(request, f"Benutzer {target.username} gespeichert, aber die Einladung ging nicht raus: {problem} "
+                           "Du kannst sie beim Benutzer erneut senden.", "err")
+            return go(f"/users/{target.id}/edit")
+        flash(request, f"Benutzer {target.username} gespeichert. Die Einladung wurde an {target.email} geschickt.")
+    else:
+        flash(request, f"Benutzer {target.username} gespeichert.")
     return go("/users")
+
+
+@app.post("/users/{uid}/invite")
+async def users_invite(uid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
+    """Schickt einem Benutzer (erneut) einen Link, mit dem er sein Passwort selbst festlegt."""
+    await read_form(request)
+    target = need(db.get(m.User, uid))
+    if not target.email:
+        flash(request, "Bei diesem Benutzer ist keine E-Mail-Adresse hinterlegt.", "err")
+    else:
+        problem = await send_invite(request, db, target, user)
+        if problem:
+            flash(request, f"Die Einladung ging nicht raus: {problem}", "err")
+        else:
+            flash(request, f"Link zum Festlegen des Passworts an {target.email} geschickt. Er gilt {mailer.INVITE_HOURS} Stunden.")
+    return go(f"/users/{uid}/edit")
+
+
+def invited_user(db: Session, token: str) -> m.User | None:
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    found = db.scalar(select(m.User).where(m.User.invite_hash == digest))
+    if not found or not found.invite_expires or found.invite_expires < m.utcnow():
+        return None
+    return found
+
+
+@app.get("/invite/{token}")
+def invite_form(token: str, request: Request, db: Session = Depends(get_db)):
+    return page(request, "invite.html", None, target=invited_user(db, token), token=token, hours=mailer.INVITE_HOURS)
+
+
+@app.post("/invite/{token}")
+async def invite_save(token: str, request: Request, db: Session = Depends(get_db)):
+    form = await read_form(request)
+    target = invited_user(db, token)
+    if target is None:
+        return page(request, "invite.html", None, target=None, token=token, hours=mailer.INVITE_HOURS)
+    password = str(form.get("password", ""))
+    if len(password) < 12 or password != str(form.get("repeat", "")):
+        flash(request, "Das Passwort braucht mindestens 12 Zeichen, und beide Eingaben müssen gleich sein.", "err")
+        return go(f"/invite/{token}")
+    target.password_hash = sec.hash_password(password)
+    target.invite_hash, target.invite_expires = "", None  # Link ist damit verbraucht
+    db.commit()
+    flash(request, "Passwort gespeichert. Du kannst dich jetzt anmelden.")
+    return go("/login")
+
+
+@app.get("/settings")
+def settings_view(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
+    settings = mailer.load(db)
+    return page(request, "settings.html", user, s=settings, has_password=bool(settings["smtp_password"]),
+                ready=mailer.configured(settings), detected=str(request.base_url))
+
+
+@app.post("/settings")
+async def settings_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("users:2"))):
+    form = await read_form(request)
+    values = {"smtp_host": text(form, "smtp_host", 200), "smtp_user": text(form, "smtp_user", 200),
+              "smtp_security": text(form, "smtp_security", 10) if text(form, "smtp_security") in ("starttls", "ssl", "none") else "starttls",
+              "smtp_port": text(form, "smtp_port", 5) if text(form, "smtp_port").isdigit() else "",
+              "mail_from": text(form, "mail_from", 200), "base_url": text(form, "base_url", 200)}
+    if values["mail_from"] and not mailer.valid_address(values["mail_from"]):
+        flash(request, "Die Absenderadresse ist ungültig. Nichts gespeichert.", "err")
+        return go("/settings")
+    if values["base_url"] and not re.match(r"^https?://[^\s/]+", values["base_url"]):
+        flash(request, "Die Adresse des Gateways muss mit http:// oder https:// beginnen. Nichts gespeichert.", "err")
+        return go("/settings")
+    if str(form.get("smtp_password", "")):
+        values["smtp_password"] = str(form["smtp_password"])
+    if "smtp_password_clear" in form:
+        values["smtp_password"] = ""
+    mailer.save(db, values)
+    if "send_test" in form:
+        to = text(form, "test_to", 200)
+        try:
+            await asyncio.to_thread(mailer.deliver, mailer.load(db), to, "Testnachricht vom DIVERA Gateway",
+                                    "Der E-Mail-Versand des DIVERA Gateway funktioniert.\n")
+            flash(request, f"Gespeichert. Testnachricht an {to} verschickt.")
+        except RuntimeError as exc:
+            flash(request, f"Gespeichert, aber die Testnachricht ging nicht raus: {exc}", "err")
+    else:
+        flash(request, "Einstellungen gespeichert.")
+    return go("/settings")
 
 
 @app.post("/users/{uid}/delete")

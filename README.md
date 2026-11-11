@@ -237,6 +237,18 @@ Unter „Benutzer" legst du Konten an und vergibst Rechte je Bereich:
 - **Kunden:** Ohne den Haken „Alle Kunden" sieht ein Benutzer nur die angekreuzten Kunden samt Quellen, Regeln und Protokoll.
 - **Schutz vor Aussperren:** Der letzte Benutzer mit Rechteverwaltung lässt sich weder herabstufen noch löschen.
 - **Eigenes Passwort:** Jeder ändert es unter „Mein Konto".
+- **Einladung per E-Mail:** Ist unter „Einstellungen" ein Mailserver eingetragen, bekommt ein neuer Benutzer auf Wunsch
+  eine E-Mail mit seinem Benutzernamen und einem Einmal-Link, über den er sein Passwort selbst festlegt. Der Link gilt
+  48 Stunden. Ein Passwort wird nie per E-Mail verschickt. Beim Benutzer lässt sich der Link erneut senden, etwa wenn
+  jemand sein Passwort vergessen hat.
+
+### E-Mail-Versand einrichten
+
+Unter „Einstellungen" (nur mit Rechteverwaltung sichtbar) Mailserver, Port, Verschlüsselung, Anmeldung und
+Absenderadresse eintragen und mit „Speichern und Testnachricht senden" prüfen. Dort steht auch die Adresse, unter der
+das Gateway für Benutzer erreichbar ist; sie wird für den Link in der Einladung verwendet. Exchange Online nimmt eine
+einfache Anmeldung mit Benutzername und Passwort am SMTP-Server oft nicht mehr an; ein eigener Mailserver oder ein
+SMTP-Relay ist dafür die einfachere Wahl.
 
 Wer Benutzer und Rechte verwalten darf, sieht auf der Startseite zusätzlich, wer angemeldet ist und wie viele
 Meldungen erfolgreich oder fehlgeschlagen sind.

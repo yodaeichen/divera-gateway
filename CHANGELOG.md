@@ -2,6 +2,12 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.20.0
+
+- E-Mail-Adresse je Benutzer und Einladung per E-Mail: neue Benutzer legen ihr Passwort über einen Einmal-Link selbst fest
+- Einstellungen für den E-Mail-Versand (SMTP) mit Testnachricht
+- Link zum Festlegen des Passworts lässt sich beim Benutzer erneut senden
+
 ## 1.19.0
 
 - Versionsnummer eingeführt: Anzeige in der Fußzeile, im Startprotokoll und unter `/healthz`

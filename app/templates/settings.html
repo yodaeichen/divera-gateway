@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Einstellungen</h1>
+<form method="post" action="/settings" autocomplete="off">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="card">
+  <h2>E-Mail-Versand {% if ready %}<span class="tag gesendet">eingerichtet</span>{% else %}<span class="tag">nicht eingerichtet</span>{% endif %}</h2>
+  <p class="hint">Wird nur für Einladungen an Gateway-Benutzer und für Links zum Festlegen des Passworts gebraucht. Mit der Übergabe an DIVERA hat das nichts zu tun.</p>
+  <div class="grid">
+    <div><label>Mailserver (SMTP)</label><input type="text" name="smtp_host" value="{{ s.smtp_host }}" placeholder="mail.example.de">
+      <p class="hint">Name des Servers für ausgehende Mails.</p></div>
+    <div><label>Port</label><input type="number" name="smtp_port" value="{{ s.smtp_port }}" placeholder="587">
+      <p class="hint">Leer lassen für den üblichen Port: 587 bei STARTTLS, 465 bei SSL/TLS.</p></div>
+    <div><label>Verschlüsselung</label><select name="smtp_security">
+        <option value="starttls" {{ 'selected' if s.smtp_security in ('', 'starttls') }}>STARTTLS (üblich)</option>
+        <option value="ssl" {{ 'selected' if s.smtp_security == 'ssl' }}>SSL/TLS</option>
+        <option value="none" {{ 'selected' if s.smtp_security == 'none' }}>keine (nur im internen Netz)</option></select></div>
+    <div><label>Absenderadresse</label><input type="text" name="mail_from" value="{{ s.mail_from }}" placeholder="gateway@example.de">
+      <p class="hint">Muss eine Adresse sein, die der Mailserver für diese Anmeldung zulässt.</p></div>
+    <div><label>Benutzername</label><input type="text" name="smtp_user" value="{{ s.smtp_user }}">
+      <p class="hint">Leer lassen, wenn der Server keine Anmeldung verlangt.</p></div>
+    <div><label>Passwort</label><input type="password" name="smtp_password" autocomplete="new-password" placeholder="{{ 'gespeichert, leer lassen zum Beibehalten' if has_password else '' }}">
+      {% if has_password %}<label class="check"><input type="checkbox" name="smtp_password_clear"> Passwort entfernen</label>{% endif %}
+      <p class="hint">Wird verschlüsselt gespeichert und nie wieder angezeigt.</p></div>
+  </div>
+</div>
+<div class="card">
+  <h2>Adresse des Gateways</h2>
+  <label>Adresse, unter der Benutzer das Gateway erreichen</label>
+  <input type="text" name="base_url" value="{{ s.base_url }}" placeholder="{{ detected }}">
+  <p class="hint">Wird für den Link in der Einladung verwendet. Leer lassen, um die Adresse zu nehmen, über die du gerade zugreifst ({{ detected }}). Eintragen, wenn Benutzer das Gateway unter einer anderen Adresse erreichen als du.</p>
+</div>
+<div class="card">
+  <label>Testnachricht an</label><input type="text" name="test_to" value="{{ user.email or '' }}" placeholder="deine@adresse.de">
+  <div class="actions">
+    <button>Speichern</button>
+    <button class="light" name="send_test" value="1">Speichern und Testnachricht senden</button>
+  </div>
+</div>
+</form>
+{% endblock %}

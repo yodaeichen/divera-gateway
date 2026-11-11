@@ -3,10 +3,11 @@
 <div class="row"><h1>Benutzer und Rechte</h1><a class="btn" href="/users/new">Benutzer anlegen</a></div>
 <div class="card">
 <table>
-<tr><th>Benutzername</th><th>Rolle</th><th>Kunden</th><th></th></tr>
+<tr><th>Benutzername</th><th>E-Mail</th><th>Rolle</th><th>Kunden</th><th></th></tr>
 {% for r in rows %}
 <tr>
   <td><a href="/users/{{ r.user.id }}/edit"><strong>{{ r.user.username }}</strong></a>{% if r.user.id == user.id %} <span class="tag">du</span>{% endif %}</td>
+  <td>{{ r.user.email or '' }}{% if r.pending %} <span class="tag test">Einladung offen</span>{% endif %}</td>
   <td>{{ r.role }}</td>
   <td>{% if r.all %}alle{% elif r.tenants %}{{ r.tenants|join(', ') }}{% else %}<span class="tag fehler">keiner freigegeben</span>{% endif %}</td>
   <td style="white-space:nowrap"><a class="btn light" href="/users/{{ r.user.id }}/edit">Bearbeiten</a>

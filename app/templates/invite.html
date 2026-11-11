@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card login">
+  <h1 class="loginbrand">DIVERA <span>Gateway</span><small>powered by yodaeichen</small></h1>
+  {% if target %}
+  <p>Hallo <strong>{{ target.username }}</strong>, lege hier dein Passwort fest.</p>
+  <form method="post" action="/invite/{{ token }}" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Neues Passwort</label><input type="password" name="password" minlength="12" autocomplete="new-password" required autofocus>
+    <label>Passwort wiederholen</label><input type="password" name="repeat" minlength="12" autocomplete="new-password" required>
+    <p class="hint">Mindestens 12 Zeichen.</p>
+    <div class="actions"><button>Passwort speichern</button></div>
+  </form>
+  {% else %}
+  <p><strong>Dieser Link ist ungültig oder abgelaufen.</strong></p>
+  <p class="hint">Links gelten {{ hours }} Stunden und funktionieren nur einmal. Bitte lass dir von der Person, die deinen Zugang verwaltet, einen neuen schicken.</p>
+  <div class="actions"><a class="btn light" href="/login">Zur Anmeldung</a></div>
+  {% endif %}
+</div>
+{% endblock %}
