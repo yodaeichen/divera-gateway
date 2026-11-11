@@ -77,3 +77,10 @@ footer a { color:var(--muted); } footer a:hover { color:var(--ink); } footer a.s
 .stat.ok strong { color:var(--ok); } .stat.bad { border-color:#f3c2bd; background:#fdf3f2; } .stat.bad strong { color:#b42318; }
 .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#c4cad4; margin-right:8px; } .dot.on { background:#2fa863; }
 .tag.ignoriert { background:#eef0f4; color:var(--muted); }
+
+/* Hilfeseite */
+.helpnav { margin:-6px 0 16px; color:var(--muted); } html { scroll-behavior:smooth; } .card[id] { scroll-margin-top:12px; }
+ol.steps { margin:0; padding-left:22px; } ol.steps li { padding:5px 0; }
+#felder h3, .faq h3 { font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:20px 0 6px; }
+.faq details { border-top:1px solid var(--line); padding:9px 0; } .faq details:last-of-type { border-bottom:1px solid var(--line); }
+.faq summary { cursor:pointer; font-weight:600; } .faq details p { margin:8px 0 2px; color:#344054; }

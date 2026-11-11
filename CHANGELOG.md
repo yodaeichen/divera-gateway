@@ -2,6 +2,10 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.21.0
+
+- Hilfeseite im Gateway: die Schritte bis zur ersten Meldung, Begriffe, alle Felder im Überblick und häufige Fragen
+
 ## 1.20.0
 
 - E-Mail-Adresse je Benutzer und Einladung per E-Mail: neue Benutzer legen ihr Passwort über einen Einmal-Link selbst fest

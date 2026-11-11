@@ -14,6 +14,7 @@ Aktuelle Version und Änderungen: siehe [CHANGELOG.md](CHANGELOG.md). Die laufen
 - **Betrieb:** Protokoll, Verbindungstest, Schlüsselprüfung, manueller Abruf, Testmodus je Kunde
 - **Benutzer:** Rechte je Bereich, Rollen als Vorlage, Beschränkung auf einzelne Kunden
 - **Übersicht für Administratoren:** angemeldete Benutzer, erfolgreiche und fehlgeschlagene Meldungen
+- **Hilfe im Gateway:** Schritte, Begriffe, Felder und häufige Fragen unter „Hilfe" in der Kopfzeile
 
 ## Installation auf Proxmox (Einzeiler)
 

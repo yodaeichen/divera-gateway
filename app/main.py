@@ -1011,6 +1011,11 @@ async def webhook(token: str, request: Request, db: Session = Depends(get_db)):
     return JSONResponse({"ok": True, "matched": matched})
 
 
+@app.get("/help")
+def help_view(request: Request, user: m.User = Depends(current_user)):
+    return page(request, "help.html", user)
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "version": VERSION}

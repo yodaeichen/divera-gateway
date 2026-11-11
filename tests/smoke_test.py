@@ -346,6 +346,9 @@ with TestClient(app, base_url="http://testserver") as c:
     c.post("/users/save", data={"csrf": tok, "username": "zwei", "password": "lang-genug-12345"})
     assert "zwei" in c.get("/users").text
 
+    hilfe = c.get("/help").text
+    assert "In sieben Schritten" in hilfe and "Häufige Fragen" in hilfe and hilfe.count("<details>") >= 20 and 'href="/help"' in hilfe
+
     # ---------- Berechtigungen ----------
     from app import access
     with m.SessionLocal() as db:
@@ -565,7 +568,7 @@ with TestClient(app, base_url="http://testserver") as c:
     assert v.get("/", follow_redirects=False).status_code == 303, "gelöschter Benutzer ist abgemeldet"
 
     c.post("/logout", data={"csrf": tok})
-    assert c.get("/logs", follow_redirects=False).status_code == 303
+    assert c.get("/logs", follow_redirects=False).status_code == 303 and c.get("/help", follow_redirects=False).status_code == 303
     with m.SessionLocal() as db:
         gone = db.query(m.User).filter_by(username="admin").one()
         assert gone.last_seen is None and gone.last_login is not None, "nach dem Abmelden sofort nicht mehr angemeldet"
