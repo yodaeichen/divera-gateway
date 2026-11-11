@@ -1,7 +1,7 @@
 # DIVERA Gateway
 
 Übergibt E-Mails und Webhook-Meldungen regelbasiert an DIVERA 24/7, als Mitteilung oder als Alarm.
-Mandantenfähig: je Kunde eigene DIVERA-Schlüssel, eigene Quellen und eigene Regeln.
+Mandantenfähig: je Löschgruppe eigene DIVERA-Schlüssel, eigene Quellen und eigene Regeln.
 
 Aktuelle Version und Änderungen: siehe [CHANGELOG.md](CHANGELOG.md). Die laufende Version steht unten auf jeder Seite.
 
@@ -11,8 +11,8 @@ Aktuelle Version und Änderungen: siehe [CHANGELOG.md](CHANGELOG.md). Die laufen
 - **Regeln:** Bedingungen auf Absender, Betreff und Text, Werte per regulärem Ausdruck herauslesen, Vorlagen mit Platzhaltern
 - **Hilfen beim Regelbau:** Regelvorschlag aus einer echten Nachricht, Live-Ansicht, Probelauf ohne Speichern, Testsendung an DIVERA
 - **Ziele:** Mitteilung (mit oder ohne Push) oder Alarm, Empfänger über RIC, angekreuzte Gruppen oder einzelne Personen
-- **Betrieb:** Protokoll, Verbindungstest, Schlüsselprüfung, manueller Abruf, Testmodus je Kunde
-- **Benutzer:** Rechte je Bereich, Rollen als Vorlage, Beschränkung auf einzelne Kunden
+- **Betrieb:** Protokoll, Verbindungstest, Schlüsselprüfung, manueller Abruf, Testmodus je Löschgruppe
+- **Benutzer:** Rechte je Bereich, Rollen als Vorlage, Beschränkung auf einzelne Löschgruppen
 - **Übersicht für Administratoren:** angemeldete Benutzer, erfolgreiche und fehlgeschlagene Meldungen
 - **Hilfe im Gateway:** Schritte, Begriffe, Felder und häufige Fragen unter „Hilfe" in der Kopfzeile
 
@@ -92,13 +92,13 @@ legen und ein Zertifikat erzwingen. Ohne HTTPS funktioniert die Anmeldung nicht,
 
 ## Erste Schritte
 
-1. Anmelden und einen Kunden anlegen. Neue Kunden stehen im **Testmodus**: Treffer werden nur protokolliert.
+1. Anmelden und eine Löschgruppe anlegen. Neue Löschgruppen stehen im **Testmodus**: Treffer werden nur protokolliert.
 2. Den Alarm-Accesskey der Einheit eintragen (DIVERA: Verwaltung > Einstellungen > Schnittstellen > API).
 3. Eine Quelle anlegen und „Verbindung testen". Der Test zeigt die neuesten Nachrichten.
 4. Bei einer typischen Nachricht „Regel vorschlagen" klicken, die Regel in der Live-Ansicht anpassen und speichern.
-5. Beim Kunden „Empfänger aus DIVERA laden", dann in der Regel Gruppen oder Personen ankreuzen (oder eine RIC eintragen).
+5. Bei der Löschgruppe „Empfänger aus DIVERA laden", dann in der Regel Gruppen oder Personen ankreuzen (oder eine RIC eintragen).
 6. Mit „Testweise an DIVERA senden" prüfen, ob die Meldung richtig ankommt. Zum Üben nur sich selbst ankreuzen.
-7. Testmodus beim Kunden ausschalten. Ab dann wird im Betrieb an DIVERA gesendet.
+7. Testmodus bei der Löschgruppe ausschalten. Ab dann wird im Betrieb an DIVERA gesendet.
 
 ## Die zwei DIVERA-Schlüssel
 
@@ -108,7 +108,7 @@ legen und ein Zertifikat erzwingen. Ohne HTTPS funktioniert die Anmeldung nicht,
 | **Persönlicher Accesskey** (optional) | Mitteilungen **ohne Push** (Schnittstelle `api/v2/news`) | API-Schlüssel eines System-Benutzers in DIVERA |
 
 Der System-Benutzer braucht in DIVERA das Recht, Mitteilungen zu erstellen. Fehlt es, antwortet DIVERA mit
-`HTTP 403 Nicht autorisiert`. **Schlüssel prüfen** auf der Kundenseite zeigt, ob beide Schlüssel angenommen werden.
+`HTTP 403 Nicht autorisiert`. **Schlüssel prüfen** auf der Seite der Löschgruppe zeigt, ob beide Schlüssel angenommen werden.
 
 Beide Schlüssel werden verschlüsselt gespeichert und in der Oberfläche nie wieder angezeigt.
 
@@ -196,7 +196,7 @@ DIVERA begrenzt: Stichwort 50 Zeichen (FREE 30), Text 1000, Adresse 200. Die Liv
 **Empfänger:**
 
 - **RIC:** Alarmierungs-RIC der Gruppen wie in DIVERA hinterlegt, mehrere mit Komma (`LZ1,LZ2`).
-- **Gruppen und Personen:** Nach „Empfänger aus DIVERA laden" beim Kunden zum Ankreuzen. Für eine Meldung an nur
+- **Gruppen und Personen:** Nach „Empfänger aus DIVERA laden" bei der Löschgruppe zum Ankreuzen. Für eine Meldung an nur
   eine Person: diese Person ankreuzen, RIC und Gruppen leer lassen.
 - **Weitere API-Parameter:** eine Zeile je `name=wert`, z. B. `alarmcode_id=5`.
 
@@ -227,7 +227,7 @@ Unter „Benutzer" legst du Konten an und vergibst Rechte je Bereich:
 
 | Bereich | Stufen |
 |---|---|
-| Kunden und Schlüssel | nur sehen, bearbeiten |
+| Löschgruppen und Schlüssel | nur sehen, bearbeiten |
 | Quellen | kein Zugriff, nur sehen, bearbeiten |
 | Regeln | kein Zugriff, nur sehen, bearbeiten |
 | Protokoll | kein Zugriff, sehen |
@@ -235,7 +235,7 @@ Unter „Benutzer" legst du Konten an und vergibst Rechte je Bereich:
 | Von Hand an DIVERA senden | erlaubt oder nicht |
 
 - **Rollen als Vorlage:** Administrator, Bearbeiter und Betrachter füllen die Einzelrechte aus; danach lässt sich jedes Recht einzeln ändern.
-- **Kunden:** Ohne den Haken „Alle Kunden" sieht ein Benutzer nur die angekreuzten Kunden samt Quellen, Regeln und Protokoll.
+- **Löschgruppen:** Ohne den Haken „Alle Löschgruppen" sieht ein Benutzer nur die angekreuzten Löschgruppen samt Quellen, Regeln und Protokoll.
 - **Schutz vor Aussperren:** Der letzte Benutzer mit Rechteverwaltung lässt sich weder herabstufen noch löschen.
 - **Eigenes Passwort:** Jeder ändert es unter „Mein Konto".
 - **Einladung per E-Mail:** Ist unter „Einstellungen" ein Mailserver eingetragen, bekommt ein neuer Benutzer auf Wunsch

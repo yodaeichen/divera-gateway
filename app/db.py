@@ -40,7 +40,7 @@ class User(Base):
     # Rechte als JSON (siehe access.py). Leer = Konto aus der Zeit vor der Rechteverwaltung, gilt als Administrator.
     perms: Mapped[str | None] = mapped_column(Text, nullable=True)
     all_tenants: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
-    tenant_ids: Mapped[str] = mapped_column(Text, default="", server_default="")  # erlaubte Kunden-IDs, mit Komma
+    tenant_ids: Mapped[str] = mapped_column(Text, default="", server_default="")  # erlaubte Löschgruppen-IDs, mit Komma
     email: Mapped[str] = mapped_column(String(200), default="", server_default="")
     # Einladung: nur der Hash des Einmal-Links wird gespeichert, mit Ablaufzeit
     invite_hash: Mapped[str] = mapped_column(String(64), default="", server_default="")
@@ -57,7 +57,7 @@ class Setting(Base):
 
 
 class Tenant(Base):
-    """Ein Kunde mit eigenem DIVERA-Zugang."""
+    """Eine Löschgruppe mit eigenem DIVERA-Zugang."""
     __tablename__ = "tenants"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))

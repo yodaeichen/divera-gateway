@@ -1,4 +1,4 @@
-// Benutzerformular: Rollenvorlage füllt die Einzelrechte aus; die Kundenliste wird bei "alle Kunden" ausgegraut.
+// Benutzerformular: Rollenvorlage füllt die Einzelrechte aus; die Liste der Löschgruppen wird bei "alle Löschgruppen" ausgegraut.
 (function () {
   var preset = document.getElementById('preset');
   var form = document.getElementById('user-form');

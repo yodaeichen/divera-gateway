@@ -2,6 +2,10 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.22.0
+
+- Umbenennung in der gesamten Oberfläche: „Kunde" heißt jetzt „Löschgruppe"
+
 ## 1.21.0
 
 - Hilfeseite im Gateway: die Schritte bis zur ersten Meldung, Begriffe, alle Felder im Überblick und häufige Fragen
@@ -19,7 +23,7 @@ Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des 
 
 ## 1.18.0
 
-- Übersicht für Administratoren auf der Startseite: angemeldete Benutzer sowie erfolgreiche und fehlgeschlagene Meldungen (24 Stunden, 7 Tage, gesamt, je Kunde)
+- Übersicht für Administratoren auf der Startseite: angemeldete Benutzer sowie erfolgreiche und fehlgeschlagene Meldungen (24 Stunden, 7 Tage, gesamt, je Löschgruppe)
 
 ## 1.17.0
 
@@ -27,14 +31,14 @@ Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des 
 
 ## 1.16.0
 
-- Rechteverwaltung: Einzelrechte je Bereich, Rollen als Vorlage, Beschränkung auf einzelne Kunden
+- Rechteverwaltung: Einzelrechte je Bereich, Rollen als Vorlage, Beschränkung auf einzelne Löschgruppen
 - Seite „Mein Konto" zum Ändern des eigenen Passworts
 
 ## 1.12.0 bis 1.15.0
 
 - Mitteilungen ohne Push über die DIVERA-Schnittstelle v2
-- Zweiter Schlüssel je Kunde für die v2-Schnittstelle (System-Benutzer)
-- Schlüsselprüfung beim Kunden, genauere Fehlermeldungen bei Ablehnung durch DIVERA
+- Zweiter Schlüssel je Löschgruppe für die v2-Schnittstelle (System-Benutzer)
+- Schlüsselprüfung bei der Löschgruppe, genauere Fehlermeldungen bei Ablehnung durch DIVERA
 
 ## 1.9.0 bis 1.11.0
 
@@ -44,7 +48,7 @@ Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des 
 
 ## 1.5.0 bis 1.8.0
 
-- Knopf „Jetzt abrufen" je Kunde, Anzeige von letztem und nächstem Abruf
+- Knopf „Jetzt abrufen" je Löschgruppe, Anzeige von letztem und nächstem Abruf
 - Empfänger aus DIVERA laden und in Regeln als Personen oder Gruppen ankreuzen
 - Neue Regeln stehen standardmäßig auf „Mitteilung" statt „Alarm"
 
@@ -58,4 +62,4 @@ Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des 
 
 ## 1.0.0
 
-- Erste Version: Kunden, Quellen (Microsoft 365, IMAP, Webhook), Regeln, Protokoll, Installation auf Proxmox und mit Docker
+- Erste Version: Löschgruppen, Quellen (Microsoft 365, IMAP, Webhook), Regeln, Protokoll, Installation auf Proxmox und mit Docker

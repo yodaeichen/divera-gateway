@@ -1,4 +1,4 @@
-"""Durchlauftest ohne Netzwerk: Anmeldung, Kunde, Quelle, Regel, Webhook, Protokoll.
+"""Durchlauftest ohne Netzwerk: Anmeldung, Löschgruppe, Quelle, Regel, Webhook, Protokoll.
 
 Aufruf:  python tests/smoke_test.py
 """
@@ -35,7 +35,7 @@ with TestClient(app, base_url="http://testserver") as c:
     tok = csrf(c.get("/login").text)
     assert c.post("/login", data={"username": "admin", "password": "test-passwort-123"}).status_code == 403, "CSRF"
     r = c.post("/login", data={"csrf": tok, "username": "admin", "password": "test-passwort-123"})
-    assert "Kunden" in r.text
+    assert "Löschgruppen" in r.text
     tok = csrf(r.text)
 
     r = c.post("/tenants/save", data={"csrf": tok, "name": "FF Musterstadt", "accesskey": "geheim123", "active": "on", "test_mode": "on"})
@@ -318,7 +318,7 @@ with TestClient(app, base_url="http://testserver") as c:
     rules.fetch_directory = lambda key: (_ for _ in ()).throw(RuntimeError("DIVERA lehnt den Accesskey für diese Abfrage ab (HTTP 403)."))
     assert "konnten nicht geladen werden" in c.post("/tenants/1/directory", data={"csrf": tok}).text
 
-    # Manueller Abruf je Kunde
+    # Manueller Abruf je Löschgruppe
     calls = []
     def fake_poll(cfg, state):
         calls.append(cfg["mailbox"])
@@ -396,7 +396,7 @@ with TestClient(app, base_url="http://testserver") as c:
 
     # Übersicht für Administratoren: wer angemeldet ist, Erfolg und Fehler
     adm = c.get("/").text
-    assert "Angemeldet" in adm and "Meldungen" in adm and "erfolgreich<br>in 24 Stunden" in adm and "Je Kunde, letzte 7 Tage" in adm
+    assert "Angemeldet" in adm and "Meldungen" in adm and "erfolgreich<br>in 24 Stunden" in adm and "Je Löschgruppe, letzte 7 Tage" in adm
     with m.SessionLocal() as db:
         ov = __import__("app.main", fromlist=["x"]).admin_overview(db, m.utcnow())
         assert ov["online"] == 1 and [p["name"] for p in ov["people"] if p["online"]] == ["admin"]
@@ -404,9 +404,9 @@ with TestClient(app, base_url="http://testserver") as c:
         assert total["gesendet"] >= 1 and total["fehler"] >= 1 and total["test"] >= 1 and total == ov["windows"][0][1]
         assert dict(ov["per_tenant"])["FF Musterstadt"]["gesendet"] == total["gesendet"]
 
-    # Betrachter, nur Kunde 1
+    # Betrachter, nur Löschgruppe 1
     v, vt, home = login("leser", "leser-passwort-1")
-    assert "FF Musterstadt" in home and "Andere Wehr" not in home and "Kunde anlegen" not in home and "Jetzt abrufen" not in home
+    assert "FF Musterstadt" in home and "Andere Wehr" not in home and "Löschgruppe anlegen" not in home and "Jetzt abrufen" not in home
     assert "GEHEIM-FREMD" not in home and "Alarm Eigen" in home and ">Benutzer<" not in home and "Mein Konto" in home
     assert "Angemeldet" not in home and "in 24 Stunden" not in home, "Übersicht nur für Administratoren"
     with m.SessionLocal() as db:
@@ -418,7 +418,7 @@ with TestClient(app, base_url="http://testserver") as c:
         assert __import__("app.main", fromlist=["x"]).admin_overview(db, m.utcnow())["online"] == 1, "nach 15 Minuten ohne Aktivität nicht mehr angemeldet"
     assert v.get("/tenants/2").status_code == 404 and v.get(f"/rules/{other_rule}/edit").status_code == 404
     t1 = v.get("/tenants/1").text
-    assert "Kunde bearbeiten" not in t1 and "Regel anlegen" not in t1 and "Schlüssel prüfen" not in t1 and "/hook/" not in t1
+    assert "Löschgruppe bearbeiten" not in t1 and "Regel anlegen" not in t1 and "Schlüssel prüfen" not in t1 and "/hook/" not in t1
     assert "Empfänger aus DIVERA laden" not in t1 and "Verbindung testen" in t1 and "Löschen" not in t1 and "/sources/new" not in t1
     for url in ("/tenants/1/edit", "/tenants/new", "/tenants/1/rules/new", "/sources/1/edit", "/users", "/users/new"):
         resp = v.get(url); assert resp.status_code == 403 and "Keine Berechtigung" in resp.text, url
@@ -443,12 +443,12 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "Letzter Empfang" in stest and "Regel daraus vorschlagen" not in stest and "/hook/" not in stest
     assert "stimmt nicht" in v.post("/account", data={"csrf": vt, "current": "falsch", "password": "neues-passwort-12"}).text
     assert "Passwort geändert" in v.post("/account", data={"csrf": vt, "current": "leser-passwort-1", "password": "neues-passwort-12"}).text
-    assert "Kunden" in login("leser", "neues-passwort-12")[2]
+    assert "Löschgruppen" in login("leser", "neues-passwort-12")[2]
 
-    # Bearbeiter, nur Kunde 1
+    # Bearbeiter, nur Löschgruppe 1
     e, et, _ = login("bearb", "bearb-passwort-1")
     e1 = e.get("/tenants/1").text
-    assert "Regel anlegen" in e1 and "Jetzt abrufen" in e1 and "/hook/" in e1 and "Kunde bearbeiten" not in e1
+    assert "Regel anlegen" in e1 and "Jetzt abrufen" in e1 and "/hook/" in e1 and "Löschgruppe bearbeiten" not in e1
     assert "Regel gespeichert" in e.post("/rules/save", data=dict(RULE, csrf=et, name="Vom Bearbeiter", t_subject="Alarm", t_body=body)).text
     assert e.post("/rules/save", data={"csrf": et, "tenant_id": "2", "name": "Eingeschleust"}).status_code == 404
     assert e.post("/rules/save", data=dict(RULE, csrf=et, id=str(other_rule))).status_code == 404
@@ -460,11 +460,11 @@ with TestClient(app, base_url="http://testserver") as c:
         assert db.get(m.Rule, 1).name == "Vom Bearbeiter" and db.query(m.Rule).filter_by(name="Eingeschleust").count() == 0
         assert db.get(m.Rule, other_rule).name == "Fremdregel"
 
-    # Angepasst: Regeln bearbeiten, kein Protokoll, alle Kunden
+    # Angepasst: Regeln bearbeiten, kein Protokoll, alle Löschgruppen
     g, gt, ghome = login("eigen", "eigen-passwort-1")
     assert "Andere Wehr" in ghome and "Letzte Ereignisse" not in ghome and ">Protokoll<" not in ghome
     assert g.get("/logs").status_code == 403 and g.get(f"/rules/{other_rule}/edit").status_code == 200
-    assert "Protokoll dieses Kunden" not in g.get("/tenants/2").text
+    assert "Protokoll dieser Löschgruppe" not in g.get("/tenants/2").text
 
     # ---------- E-Mail-Adresse und Einladung ----------
     from app import mailer

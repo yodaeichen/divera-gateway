@@ -35,10 +35,10 @@
   {% endfor %}
   </table>
   {% if tenant.test_mode %}<div class="flash">Testmodus ist an: „Jetzt verarbeiten" wendet die Regeln an und schreibt ins Protokoll, sendet aber nichts an DIVERA.</div>
-  {% else %}<div class="flash err">Der Kunde ist scharf: „Jetzt verarbeiten" übergibt die Nachricht bei passender Regel wirklich an DIVERA.</div>{% endif %}
+  {% else %}<div class="flash err">Die Löschgruppe ist scharf: „Jetzt verarbeiten" übergibt die Nachricht bei passender Regel wirklich an DIVERA.</div>{% endif %}
   <p class="hint">Der automatische Abruf nimmt nur Nachrichten, die nach dem Anlegen oder letzten Speichern der Quelle eingegangen sind. Mit „Jetzt verarbeiten" schickst du eine der gezeigten Nachrichten von Hand durch die Regeln, auch wenn sie älter ist.</p>
   <p class="hint">Nur zur Kontrolle angezeigt, nichts davon wird gespeichert oder an DIVERA übergeben. „Regel vorschlagen" öffnet eine vorausgefüllte, noch ungespeicherte Regel mit dieser Nachricht als Beispiel.</p>
 </div>
 {% endif %}
-<p><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zum Kunden</a> {% if perm.sources >= 2 %}<a class="btn light" href="/sources/{{ source.id }}/edit">Quelle bearbeiten</a>{% endif %}</p>
+<p><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zur Löschgruppe</a> {% if perm.sources >= 2 %}<a class="btn light" href="/sources/{{ source.id }}/edit">Quelle bearbeiten</a>{% endif %}</p>
 {% endblock %}

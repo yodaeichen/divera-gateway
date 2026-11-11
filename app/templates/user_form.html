@@ -40,12 +40,12 @@
 </div>
 
 <div class="card">
-  <h2>Kunden</h2>
-  <label class="check"><input type="checkbox" name="all_tenants" id="all-tenants" {{ 'checked' if t_all }}> Alle Kunden, auch künftig angelegte</label>
-  <p class="hint">Ohne diesen Haken sieht der Benutzer nur die unten angekreuzten Kunden mit ihren Quellen, Regeln und Protokolleinträgen. Alle anderen sind für ihn unsichtbar. Wer Benutzer und Rechte verwalten darf, sieht immer alle Kunden.</p>
+  <h2>Löschgruppen</h2>
+  <label class="check"><input type="checkbox" name="all_tenants" id="all-tenants" {{ 'checked' if t_all }}> Alle Löschgruppen, auch künftig angelegte</label>
+  <p class="hint">Ohne diesen Haken sieht der Benutzer nur die unten angekreuzten Löschgruppen mit ihren Quellen, Regeln und Protokolleinträgen. Alle anderen sind für ihn unsichtbar. Wer Benutzer und Rechte verwalten darf, sieht immer alle Löschgruppen.</p>
   <div class="picklist" id="tenant-list">
     {% for t in tenants %}<label class="check"><input type="checkbox" name="tenant" value="{{ t.id }}" {{ 'checked' if t.id in t_ids }}> {{ t.name }}</label>
-    {% else %}<span class="hint">Noch kein Kunde angelegt.</span>{% endfor %}
+    {% else %}<span class="hint">Noch keine Löschgruppe angelegt.</span>{% endfor %}
   </div>
   <div class="actions"><button>Speichern</button><a class="btn light" href="/users">Abbrechen</a></div>
 </div>

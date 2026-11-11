@@ -1,5 +1,5 @@
 <table>
-<tr><th>Zeit</th><th>Kunde</th><th>Quelle</th><th>Absender / Betreff</th><th>Regel</th><th>Status</th><th>Details</th></tr>
+<tr><th>Zeit</th><th>Löschgruppe</th><th>Quelle</th><th>Absender / Betreff</th><th>Regel</th><th>Status</th><th>Details</th></tr>
 {% for l in logs %}
 <tr>
   <td>{{ l.ts|localtime }}</td><td>{{ l.tenant_name }}</td><td>{{ l.source_name }}</td>

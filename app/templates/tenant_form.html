@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ 'Kunde bearbeiten' if tenant else 'Kunde anlegen' }}</h1>
+<h1>{{ 'Löschgruppe bearbeiten' if tenant else 'Löschgruppe anlegen' }}</h1>
 <div class="card">
 <form method="post" action="/tenants/save">
   <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -20,6 +20,6 @@
 </div>
 {% if tenant %}
 <form method="post" action="/tenants/{{ tenant.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}">
-<button class="link">Kunde mit allen Quellen und Regeln löschen</button></form>
+<button class="link">Löschgruppe mit allen Quellen und Regeln löschen</button></form>
 {% endif %}
 {% endblock %}

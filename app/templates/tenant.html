@@ -5,11 +5,11 @@
     {% if not tenant.active %}<span class="tag">inaktiv</span>{% elif tenant.test_mode %}<span class="tag test">Testmodus</span>{% else %}<span class="tag gesendet">scharf</span>{% endif %}</h1>
   <div>{% if perm.send %}<form class="inline" method="post" action="/tenants/{{ tenant.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light" {{ 'disabled' if not tenant.active }}>Jetzt abrufen</button></form>{% endif %}
   {% if perm.tenants >= 2 %}<form class="inline" method="post" action="/tenants/{{ tenant.id }}/keycheck"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Schlüssel prüfen</button></form>
-  <a class="btn light" href="/tenants/{{ tenant.id }}/edit">Kunde bearbeiten</a>{% endif %}</div>
+  <a class="btn light" href="/tenants/{{ tenant.id }}/edit">Löschgruppe bearbeiten</a>{% endif %}</div>
 </div>
 {% if perm.tenants >= 2 %}
 {% if not tenant.accesskey_enc %}<div class="flash err">Es ist noch kein DIVERA-Accesskey hinterlegt.</div>{% endif %}
-{% if not tenant.accesskey_user_enc and tenant.rules|selectattr('kind', 'equalto', 'news')|selectattr('push', 'equalto', false)|list %}<div class="flash err">Mindestens eine Mitteilungs-Regel steht auf „ohne Push" und nutzt dafür die neuere DIVERA-Schnittstelle. Dafür fehlt der persönliche Accesskey: „Kunde bearbeiten" öffnen und eintragen.</div>{% endif %}
+{% if not tenant.accesskey_user_enc and tenant.rules|selectattr('kind', 'equalto', 'news')|selectattr('push', 'equalto', false)|list %}<div class="flash err">Mindestens eine Mitteilungs-Regel steht auf „ohne Push" und nutzt dafür die neuere DIVERA-Schnittstelle. Dafür fehlt der persönliche Accesskey: „Löschgruppe bearbeiten" öffnen und eintragen.</div>{% endif %}
 {% endif %}
 
 {% if checks %}
@@ -84,5 +84,5 @@
   <p class="hint">Regeln werden nach Rang geprüft, kleinste Zahl zuerst.</p>
 </div>
 {% endif %}
-{% if perm.logs %}<p><a href="/logs?tenant={{ tenant.id }}">Protokoll dieses Kunden</a></p>{% endif %}
+{% if perm.logs %}<p><a href="/logs?tenant={{ tenant.id }}">Protokoll dieser Löschgruppe</a></p>{% endif %}
 {% endblock %}

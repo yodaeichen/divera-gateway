@@ -6,13 +6,13 @@
 <div class="card" id="schritte">
   <h2>In sieben Schritten zur ersten Meldung</h2>
   <ol class="steps">
-    <li><strong>Kunde anlegen.</strong> Unter „Kunden" auf „Kunde anlegen". Name vergeben und den Alarm-Accesskey der DIVERA-Einheit eintragen. Der Testmodus bleibt zunächst an.</li>
-    <li><strong>Quelle anlegen.</strong> Beim Kunden ein Postfach (Microsoft 365 oder IMAP) oder einen Webhook hinzufügen.</li>
+    <li><strong>Löschgruppe anlegen.</strong> Unter „Löschgruppen" auf „Löschgruppe anlegen". Name vergeben und den Alarm-Accesskey der DIVERA-Einheit eintragen. Der Testmodus bleibt zunächst an.</li>
+    <li><strong>Quelle anlegen.</strong> Bei der Löschgruppe ein Postfach (Microsoft 365 oder IMAP) oder einen Webhook hinzufügen.</li>
     <li><strong>Verbindung testen.</strong> Der Test zeigt die neuesten Nachrichten der Quelle. Erscheinen sie, stimmt der Zugang.</li>
     <li><strong>Regel vorschlagen lassen.</strong> Im Verbindungstest bei einer typischen Nachricht auf „Regel vorschlagen". Die Regel in der Live-Ansicht rechts anpassen, bis Stichwort, Text und Adresse stimmen, dann speichern.</li>
-    <li><strong>Empfänger festlegen.</strong> Beim Kunden „Empfänger aus DIVERA laden", dann in der Regel Gruppen oder Personen ankreuzen oder eine RIC eintragen.</li>
+    <li><strong>Empfänger festlegen.</strong> Bei der Löschgruppe „Empfänger aus DIVERA laden", dann in der Regel Gruppen oder Personen ankreuzen oder eine RIC eintragen.</li>
     <li><strong>Probe senden.</strong> In der Regel „Testweise an DIVERA senden". Zum Üben nur sich selbst ankreuzen und die Art „Mitteilung" wählen.</li>
-    <li><strong>Scharf schalten.</strong> Beim Kunden den Testmodus ausschalten. Ab jetzt gehen passende Nachrichten automatisch an DIVERA.</li>
+    <li><strong>Scharf schalten.</strong> Bei der Löschgruppe den Testmodus ausschalten. Ab jetzt gehen passende Nachrichten automatisch an DIVERA.</li>
   </ol>
   <p class="hint">Welche Schritte du selbst ausführen kannst, hängt von deinen Rechten ab. Fehlt dir ein Knopf, hat dein Konto das Recht dafür nicht.</p>
 </div>
@@ -21,12 +21,12 @@
   <h2>Begriffe</h2>
   <table>
     <tr><th>Begriff</th><th>Bedeutung</th></tr>
-    <tr><td><strong>Kunde</strong></td><td>Eine DIVERA-Einheit mit ihren Schlüsseln, Quellen und Regeln. Kunden sind voneinander getrennt.</td></tr>
+    <tr><td><strong>Löschgruppe</strong></td><td>Eine DIVERA-Einheit mit ihren Schlüsseln, Quellen und Regeln. Löschgruppen sind voneinander getrennt.</td></tr>
     <tr><td><strong>Quelle</strong></td><td>Woher Nachrichten kommen: ein Postfach, das regelmäßig abgefragt wird, oder ein Webhook, an den andere Systeme Meldungen schicken.</td></tr>
     <tr><td><strong>Regel</strong></td><td>Legt fest, bei welchen Nachrichten etwas an DIVERA geht, was darin steht und wer es bekommt.</td></tr>
     <tr><td><strong>Mitteilung</strong></td><td>Information in DIVERA ohne Alarmierung, wahlweise mit oder ohne Push. Das ist die Vorgabe für neue Regeln.</td></tr>
     <tr><td><strong>Alarm</strong></td><td>Einsatz in DIVERA mit Alarmton und Rückmeldung. Muss in der Regel bewusst ausgewählt werden.</td></tr>
-    <tr><td><strong>Testmodus</strong></td><td>Schalter je Kunde. Solange er an ist, werden Treffer nur ins Protokoll geschrieben und nicht an DIVERA gesendet.</td></tr>
+    <tr><td><strong>Testmodus</strong></td><td>Schalter je Löschgruppe. Solange er an ist, werden Treffer nur ins Protokoll geschrieben und nicht an DIVERA gesendet.</td></tr>
     <tr><td><strong>Protokoll</strong></td><td>Liste aller eingegangenen Nachrichten mit dem Ergebnis: gesendet, Test, Fehler, ignoriert oder veraltet.</td></tr>
     <tr><td><strong>Platzhalter</strong></td><td>Ein Name in geschweiften Klammern wie <code>{subject}</code>, der beim Senden durch den Wert aus der Nachricht ersetzt wird.</td></tr>
   </table>
@@ -34,13 +34,13 @@
 
 <div class="card" id="felder">
   <h2>Die Felder im Überblick</h2>
-  <h3>Kunde</h3>
+  <h3>Löschgruppe</h3>
   <table>
     <tr><th>Feld</th><th>Was eintragen</th></tr>
     <tr><td>Name</td><td>Frei wählbar, z. B. der Name der Wehr.</td></tr>
     <tr><td>DIVERA-Accesskey</td><td>Der Alarm-Accesskey der Einheit. In DIVERA unter Verwaltung &gt; Einstellungen &gt; Schnittstellen &gt; API. Reicht für Alarme und für Mitteilungen mit Push.</td></tr>
     <tr><td>Persönlicher Accesskey</td><td>Nur für Mitteilungen ohne Push nötig: der API-Schlüssel eines System-Benutzers in DIVERA, der Mitteilungen erstellen darf.</td></tr>
-    <tr><td>Aktiv</td><td>Aus: Der Kunde wird nicht abgefragt und nichts wird übergeben.</td></tr>
+    <tr><td>Aktiv</td><td>Aus: Die Löschgruppe wird nicht abgefragt und nichts wird übergeben.</td></tr>
     <tr><td>Testmodus</td><td>An: Treffer nur protokollieren. Aus: wirklich an DIVERA senden.</td></tr>
   </table>
   <h3>Quelle: Microsoft 365</h3>
@@ -60,7 +60,7 @@
     <tr><td>Ordner</td><td>Meist <code>INBOX</code>.</td></tr>
   </table>
   <h3>Quelle: Webhook</h3>
-  <p>Braucht nur einen Namen. Nach dem Speichern zeigt die Kundenseite eine geheime Adresse. Andere Systeme schicken Meldungen per HTTP-POST dorthin; „Letzter Empfang" zeigt, was zuletzt ankam.</p>
+  <p>Braucht nur einen Namen. Nach dem Speichern zeigt die Seite der Löschgruppe eine geheime Adresse. Andere Systeme schicken Meldungen per HTTP-POST dorthin; „Letzter Empfang" zeigt, was zuletzt ankam.</p>
   <h3>Regel</h3>
   <table>
     <tr><th>Abschnitt</th><th>Was eintragen</th></tr>
@@ -83,7 +83,7 @@
   <details><summary>Im Protokoll steht „ignoriert".</summary>
     <p>Die Nachricht ist angekommen, aber keine Regel passt. Die Regel öffnen und die Nachricht als Beispiel eintragen: Die Live-Ansicht zeigt, welche Bedingung nicht zutrifft.</p></details>
   <details><summary>Im Protokoll steht „test", aber in DIVERA kommt nichts an.</summary>
-    <p>Der Kunde steht im Testmodus. Die Regel hat gegriffen, gesendet wurde absichtlich nicht. Testmodus beim Kunden ausschalten, wenn alles stimmt.</p></details>
+    <p>Die Löschgruppe steht im Testmodus. Die Regel hat gegriffen, gesendet wurde absichtlich nicht. Testmodus bei der Löschgruppe ausschalten, wenn alles stimmt.</p></details>
   <details><summary>Im Protokoll steht „veraltet".</summary>
     <p>Die Nachricht war beim Abruf älter als 15 Minuten, zum Beispiel nach einem Ausfall. Solche Nachrichten werden nicht mehr übergeben, damit kein alter Einsatz neu alarmiert wird.</p></details>
   <details><summary>Was bedeuten die Statuswerte im Protokoll?</summary>
@@ -93,21 +93,21 @@
   <details><summary>Was ist der Unterschied zwischen Mitteilung und Alarm?</summary>
     <p>Eine Mitteilung ist eine Information in DIVERA ohne Alarmierung. Ein Alarm legt einen Einsatz an, alarmiert mit Alarmton und fragt Rückmeldungen ab. Neue Regeln stehen auf Mitteilung, damit niemand versehentlich alarmiert.</p></details>
   <details><summary>Wie schicke ich eine Meldung nur an eine Person?</summary>
-    <p>Beim Kunden „Empfänger aus DIVERA laden". In der Regel unter „Einzelne Personen" die Person ankreuzen und RIC sowie Gruppen leer lassen. Die Live-Ansicht zeigt, an wen es geht.</p></details>
+    <p>Bei der Löschgruppe „Empfänger aus DIVERA laden". In der Regel unter „Einzelne Personen" die Person ankreuzen und RIC sowie Gruppen leer lassen. Die Live-Ansicht zeigt, an wen es geht.</p></details>
   <details><summary>Was brauche ich für Mitteilungen ohne Push?</summary>
-    <p>In der Regel „ohne Push" wählen und Gruppen oder Personen ankreuzen. Zusätzlich muss beim Kunden ein persönlicher Accesskey hinterlegt sein: der API-Schlüssel eines System-Benutzers in DIVERA, der Mitteilungen erstellen darf. Eine RIC wird auf diesem Weg nicht übertragen.</p></details>
+    <p>In der Regel „ohne Push" wählen und Gruppen oder Personen ankreuzen. Zusätzlich muss bei der Löschgruppe ein persönlicher Accesskey hinterlegt sein: der API-Schlüssel eines System-Benutzers in DIVERA, der Mitteilungen erstellen darf. Eine RIC wird auf diesem Weg nicht übertragen.</p></details>
   <details><summary>Kann ich mehrere Suchbegriffe angeben?</summary>
     <p>Ja, in den Bedingungen mit Semikolon getrennt, z. B. <code>Alarm; Einsatz; Brand</code>. Es genügt, wenn einer vorkommt. Bei Empfängern trennt dagegen das Komma, z. B. <code>LZ1,LZ2</code>.</p></details>
   <details><summary>Die Regel greift in der Live-Ansicht nicht. Woran sehe ich, warum?</summary>
     <p>Unter „Bedingungen" hat jede Bedingung einen Haken oder ein Kreuz. Ein Kreuz zeigt, welches Textstück in der Beispielnachricht fehlt. Ist „Regel greift nur, wenn jeder Ausdruck etwas findet" angekreuzt, zählt auch ein Ausdruck ohne Treffer.</p></details>
   <details><summary>Was ist der Unterschied zwischen Testmodus und „Testweise an DIVERA senden"?</summary>
-    <p>Der Testmodus gilt für den automatischen Betrieb eines Kunden und verhindert jedes Senden. „Testweise an DIVERA senden" überträgt dagegen bewusst eine einzelne Beispielnachricht wirklich, auch im Testmodus, nach einer Bestätigungsseite.</p></details>
+    <p>Der Testmodus gilt für den automatischen Betrieb einer Löschgruppe und verhindert jedes Senden. „Testweise an DIVERA senden" überträgt dagegen bewusst eine einzelne Beispielnachricht wirklich, auch im Testmodus, nach einer Bestätigungsseite.</p></details>
   <details><summary>Mehrere Regeln passen auf dieselbe Nachricht. Was passiert?</summary>
     <p>Regeln werden nach Rang geprüft, kleinste Zahl zuerst. Ist bei der ersten passenden Regel „Nach dieser Regel keine weiteren Regeln prüfen" angekreuzt, bleibt es bei dieser einen Meldung. Sonst lösen auch die folgenden passenden Regeln aus.</p></details>
 
   <h3>Fehlermeldungen</h3>
   <details><summary>DIVERA antwortet mit „HTTP 403 Nicht autorisiert".</summary>
-    <p>Bei Mitteilungen ohne Push darf der System-Benutzer in DIVERA keine Mitteilungen erstellen, oder es ist kein persönlicher Accesskey hinterlegt. „Schlüssel prüfen" auf der Kundenseite zeigt, ob beide Schlüssel angenommen werden. Wird der Schlüssel angenommen und das Senden trotzdem abgelehnt, fehlt das Recht in DIVERA.</p></details>
+    <p>Bei Mitteilungen ohne Push darf der System-Benutzer in DIVERA keine Mitteilungen erstellen, oder es ist kein persönlicher Accesskey hinterlegt. „Schlüssel prüfen" auf der Seite der Löschgruppe zeigt, ob beide Schlüssel angenommen werden. Wird der Schlüssel angenommen und das Senden trotzdem abgelehnt, fehlt das Recht in DIVERA.</p></details>
   <details><summary>Der Verbindungstest eines Microsoft-365-Postfachs schlägt fehl.</summary>
     <p><code>AADSTS7000215</code>: falscher oder abgelaufener Clientschlüssel, oft wurde die „Geheime ID" statt des Werts kopiert. Graph-Fehler 403: Die Administratorzustimmung fehlt, oder das Postfach ist für die App nicht freigegeben. Graph-Fehler 404 oder „Ordner nicht gefunden": Postfachadresse oder Ordnername stimmt nicht.</p></details>
   <details><summary>Die Anmeldung springt immer wieder auf die Anmeldeseite zurück.</summary>
@@ -115,7 +115,7 @@
 
   <h3>Benutzer und Sicherheit</h3>
   <details><summary>Wie lege ich einen Benutzer an?</summary>
-    <p>Unter „Benutzer" auf „Benutzer anlegen". Eine Rolle als Vorlage wählen, bei Bedarf einzelne Rechte anpassen und die Kunden ankreuzen, die der Benutzer sehen darf. Mit E-Mail-Adresse und angekreuzter Einladung bekommt er einen Link, über den er sein Passwort selbst festlegt.</p></details>
+    <p>Unter „Benutzer" auf „Benutzer anlegen". Eine Rolle als Vorlage wählen, bei Bedarf einzelne Rechte anpassen und die Löschgruppen ankreuzen, die der Benutzer sehen darf. Mit E-Mail-Adresse und angekreuzter Einladung bekommt er einen Link, über den er sein Passwort selbst festlegt.</p></details>
   <details><summary>Jemand hat sein Passwort vergessen.</summary>
     <p>Unter „Benutzer" den Benutzer öffnen und „Link an … senden" klicken. Er bekommt einen neuen Einmal-Link, der 48 Stunden gilt. Ohne E-Mail-Versand dort ein neues Passwort eintragen und speichern.</p></details>
   <details><summary>Wie ändere ich mein eigenes Passwort?</summary>

@@ -61,10 +61,10 @@
       <p class="hint">Reihenfolge der Prüfung, kleinste Zahl zuerst. Spezielle Regeln vor allgemeine setzen.</p></div>
   </div>
   <label>Gilt für Quelle</label>
-  <select name="source_id"><option value="">alle Quellen des Kunden</option>
+  <select name="source_id"><option value="">alle Quellen der Löschgruppe</option>
     {% for s in tenant.sources %}<option value="{{ s.id }}" {{ 'selected' if rule and rule.source_id == s.id }}>{{ s.name }} ({{ types[s.type] }})</option>{% endfor %}
   </select>
-  <p class="hint">Beschränkt die Regel auf ein Postfach oder einen Webhook. Ohne Auswahl gilt sie für alle Quellen dieses Kunden.</p>
+  <p class="hint">Beschränkt die Regel auf ein Postfach oder einen Webhook. Ohne Auswahl gilt sie für alle Quellen dieser Löschgruppe.</p>
 
   <h2 class="step">1. Bedingungen: wann greift die Regel?</h2>
   <p class="hint">Alle ausgefüllten Felder müssen zutreffen (UND). Innerhalb eines Feldes trennt ein Semikolon Alternativen (ODER). Groß- und Kleinschreibung ist egal, leere Felder werden nicht geprüft.</p>
@@ -93,7 +93,7 @@
   </div>
   <label>Benachrichtigung bei Mitteilungen</label>
   <select name="push"><option value="1" {{ 'selected' if not rule or rule.push is none or rule.push }}>mit Push</option><option value="0" {{ 'selected' if rule and rule.push is not none and not rule.push }}>ohne Push (nur in der App sichtbar)</option></select>
-  <p class="hint">Gilt nur für die Art „Mitteilung". Ohne Push erscheint die Mitteilung in der App, aber ohne Ton und ohne Hinweis auf dem Sperrbildschirm; auch SMS, Anruf, E-Mail und Pager bleiben aus. Die Empfänger wählst du dann über angekreuzte Gruppen oder Personen, eine RIC wird dabei nicht übertragen. Dieser Weg braucht beim Kunden einen persönlichen Accesskey; „mit Push" kommt ohne ihn aus.</p>
+  <p class="hint">Gilt nur für die Art „Mitteilung". Ohne Push erscheint die Mitteilung in der App, aber ohne Ton und ohne Hinweis auf dem Sperrbildschirm; auch SMS, Anruf, E-Mail und Pager bleiben aus. Die Empfänger wählst du dann über angekreuzte Gruppen oder Personen, eine RIC wird dabei nicht übertragen. Dieser Weg braucht bei der Löschgruppe einen persönlichen Accesskey; „mit Push" kommt ohne ihn aus.</p>
   {% for kind, field, title, hint in [('groups', 'grp', 'Gruppen', 'Alarmiert alle Mitglieder der angekreuzten Gruppen.'), ('persons', 'ucr', 'Einzelne Personen', 'Alarmiert genau die angekreuzten Personen. Für eine Meldung an nur eine Person: hier eine Person ankreuzen, RIC und Gruppen leer lassen.')] %}
   <label>{{ title }} <span class="count" data-count="{{ field }}"></span></label>
   {% if directory[kind] or stale[kind] %}
@@ -104,7 +104,7 @@
   </div>
   <p class="hint">{{ hint }}</p>
   {% else %}
-  <p class="hint">Noch keine Liste vorhanden. Beim Kunden auf „Empfänger aus DIVERA laden" klicken, dann erscheinen hier die {{ title }} zum Ankreuzen.</p>
+  <p class="hint">Noch keine Liste vorhanden. Bei der Löschgruppe auf „Empfänger aus DIVERA laden" klicken, dann erscheinen hier die {{ title }} zum Ankreuzen.</p>
   {% endif %}
   {% endfor %}
   <p class="hint">RIC, Gruppen und Personen werden gemeinsam an DIVERA übergeben. Die Live-Ansicht zeigt, was mitgeschickt wird.</p>
@@ -137,7 +137,7 @@
     <button class="light" formaction="/rules/test">Prüfen ohne Speichern</button>
     {% if perm.rules >= 2 %}<button>Speichern</button>{% endif %}
     {% if perm.send %}<button class="light" formaction="/rules/send-test">Testweise an DIVERA senden …</button>{% endif %}
-    <a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zum Kunden</a>
+    <a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zur Löschgruppe</a>
   </div>
 {% if perm.send %}<p class="hint">„Testweise an DIVERA senden" überträgt das Ergebnis für die Beispielnachricht wirklich, auch im Testmodus. Vorher erscheint eine Seite zur Bestätigung.</p>{% endif %}
 </div>

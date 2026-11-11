@@ -73,7 +73,7 @@
         : '<li>Empfänger (RIC): ' + (d.payload.ric ? esc(d.payload.ric) : '<em>keine</em>') + '</li>' +
           '<li>Gruppen: ' + (d.groups.length ? esc(d.groups.join(', ')) : '<em>keine</em>') + '</li>' +
           '<li>Personen: ' + (d.persons.length ? esc(d.persons.join(', ')) : '<em>keine</em>') + '</li>') + '</ul>';
-    if (d.plan.route === 'v2' && !d.user_key) h += '<div class="warn">Dieser Weg braucht den persönlichen Accesskey eines DIVERA-Benutzers. Beim Kunden ist noch keiner hinterlegt, DIVERA wird die Mitteilung ablehnen.</div>';
+    if (d.plan.route === 'v2' && !d.user_key) h += '<div class="warn">Dieser Weg braucht den persönlichen Accesskey eines DIVERA-Benutzers. Bei der Löschgruppe ist noch keiner hinterlegt, DIVERA wird die Mitteilung ablehnen.</div>';
     d.plan.notes.forEach(function (n) { h += '<div class="warn">' + esc(n) + '</div>'; });
     if (d.plan.route === 'v2' && d.plan.ntype === 2) h += '<div class="warn">Keine Gruppe und keine Person angekreuzt: die Mitteilung geht an alle Mitglieder der Einheit.</div>';
 

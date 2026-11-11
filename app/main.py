@@ -135,7 +135,7 @@ def allow(*needs: str):
 
 
 def tenant_for(db: Session, user: m.User, tenant_id) -> m.Tenant:
-    """Lädt einen Kunden nur, wenn der Benutzer ihn sehen darf. Fremde Kunden verhalten sich wie nicht vorhanden."""
+    """Lädt eine Löschgruppe nur, wenn der Benutzer sie sehen darf. Fremde Löschgruppen verhalten sich wie nicht vorhanden."""
     tenant = db.get(m.Tenant, int(tenant_id))
     if tenant is None or not access.allowed(user, tenant.id):
         raise HTTPException(404, "Nicht gefunden")
@@ -222,7 +222,7 @@ async def logout(request: Request, db: Session = Depends(get_db)):
     return go("/login")
 
 
-# ---------- Übersicht und Kunden ----------
+# ---------- Übersicht und Löschgruppen ----------
 
 ONLINE_MINUTES = 15
 STATUS_LABELS = [("gesendet", "Erfolgreich an DIVERA gesendet"), ("fehler", "Fehlgeschlagen"), ("test", "Nur Testmodus (nicht gesendet)"),
@@ -249,7 +249,7 @@ def admin_overview(db: Session, now: dt.datetime) -> dict:
     week = select(m.Log.tenant_name, m.Log.status, func.count(m.Log.id)).where(m.Log.ts >= now - dt.timedelta(days=7)) \
         .group_by(m.Log.tenant_name, m.Log.status)
     for name, status, number in db.execute(week).all():
-        per_tenant.setdefault(name or "ohne Kunde", {})[status] = number
+        per_tenant.setdefault(name or "ohne Löschgruppe", {})[status] = number
     return {"people": people, "online": sum(1 for p in people if p["online"]), "windows": windows,
             "per_tenant": sorted(per_tenant.items()), "labels": STATUS_LABELS, "minutes": ONLINE_MINUTES}
 
@@ -261,7 +261,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = De
     if access.perms_of(user)["logs"]:
         logs = db.scalars(select(m.Log).where(m.Log.tenant_id.in_([t.id for t in tenants])).order_by(m.Log.id.desc()).limit(15)).all()
     now, schedule = m.utcnow(), {}
-    for tenant in tenants:  # letzter und nächster Abruf je Kunde, über alle aktiven Postfächer
+    for tenant in tenants:  # letzter und nächster Abruf je Löschgruppe, über alle aktiven Postfächer
         pollable = [s for s in tenant.sources if s.active and s.type in sources.POLLERS]
         polled = [s.last_poll for s in pollable if s.last_poll]
         info = {"last": max(polled) if polled else None, "next": None, "due": False, "interval": None}
@@ -276,7 +276,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = De
 @app.get("/tenants/new")
 def tenant_new(request: Request, user: m.User = Depends(allow("tenants:2"))):
     if not access.sees_all(user):
-        raise access.Denied("Neue Kunden kann nur anlegen, wer alle Kunden sehen darf.")
+        raise access.Denied("Neue Löschgruppen kann nur anlegen, wer alle Löschgruppen sehen darf.")
     return page(request, "tenant_form.html", user, tenant=None)
 
 
@@ -303,7 +303,7 @@ def tenant_edit(tid: int, request: Request, db: Session = Depends(get_db), user:
 async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("tenants:2"))):
     form = await read_form(request)
     if not form.get("id") and not access.sees_all(user):
-        raise access.Denied("Neue Kunden kann nur anlegen, wer alle Kunden sehen darf.")
+        raise access.Denied("Neue Löschgruppen kann nur anlegen, wer alle Löschgruppen sehen darf.")
     tenant = tenant_for(db, user, int(form["id"])) if form.get("id") else m.Tenant()
     tenant.name = text(form, "name", 120) or "Unbenannt"
     tenant.active = "active" in form
@@ -316,7 +316,7 @@ async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.U
         tenant.accesskey_user_enc = ""
     db.add(tenant)
     db.commit()
-    flash(request, "Kunde gespeichert.")
+    flash(request, "Löschgruppe gespeichert.")
     return go(f"/tenants/{tenant.id}")
 
 
@@ -356,7 +356,7 @@ async def tenant_directory(tid: int, request: Request, db: Session = Depends(get
 
 @app.post("/tenants/{tid}/poll")
 async def tenant_poll(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
-    """Fragt alle Postfächer eines Kunden sofort ab, ohne auf das Intervall zu warten."""
+    """Fragt alle Postfächer einer Löschgruppe sofort ab, ohne auf das Intervall zu warten."""
     form = await read_form(request)
     tenant = tenant_for(db, user, tid)
     back = "/" if form.get("back") == "home" else f"/tenants/{tid}"
@@ -384,7 +384,7 @@ async def tenant_delete(tid: int, request: Request, db: Session = Depends(get_db
     await read_form(request)
     db.delete(tenant_for(db, user, tid))
     db.commit()
-    flash(request, "Kunde gelöscht.")
+    flash(request, "Löschgruppe gelöscht.")
     return go("/")
 
 
@@ -471,7 +471,7 @@ async def source_process(sid: int, request: Request, db: Session = Depends(get_d
     if source.type not in sources.FETCHERS:
         raise HTTPException(400, "Für diese Quelle nicht möglich")
     if not source.tenant.active:
-        flash(request, "Der Kunde ist inaktiv, es wird nichts verarbeitet.", "err")
+        flash(request, "Die Löschgruppe ist inaktiv, es wird nichts verarbeitet.", "err")
         return go(f"/tenants/{source.tenant_id}")
     try:
         msg = await asyncio.to_thread(sources.FETCHERS[source.type], source.config, text(form, "ref", 600))
@@ -538,7 +538,7 @@ def apply_rule_form(rule: m.Rule, form, db: Session) -> str:
         rule.position = 10
     source_id = int(form["source_id"]) if form.get("source_id") else None
     if source_id and need(db.get(m.Source, source_id)).tenant_id != rule.tenant_id:
-        raise HTTPException(400, "Quelle gehört zu einem anderen Kunden")
+        raise HTTPException(400, "Quelle gehört zu einer anderen Löschgruppe")
     rule.source_id = source_id
     for key in ("match_from", "match_subject", "match_body"):
         setattr(rule, key, text(form, key, 500))
@@ -641,7 +641,7 @@ async def rule_send_test(request: Request, db: Session = Depends(get_db), user: 
     if not error and not sample:
         error = "Zum Senden bitte unten eine Beispielnachricht eintragen."
     if not error and not tenant.accesskey_enc:
-        error = "Für diesen Kunden ist kein DIVERA-Accesskey hinterlegt."
+        error = "Für diese Löschgruppe ist kein DIVERA-Accesskey hinterlegt."
     data = rules.preview(rule, sample) if sample and not error else None
     if data and not data["match"]:
         error = "Die Regel greift bei der Beispielnachricht nicht, deshalb würde auch im Betrieb nichts gesendet."
