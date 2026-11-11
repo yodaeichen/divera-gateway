@@ -221,6 +221,20 @@ Dabei wird nichts gespeichert und nichts gesendet.
 
 **Testweise an DIVERA senden** überträgt das Ergebnis wirklich, auch im Testmodus, nach einer Bestätigungsseite.
 
+## Termine importieren
+
+Auf der Seite einer Löschgruppe führt „Termine aus CSV importieren" zum Import, etwa für einen Dienstplan aus Excel.
+
+1. Vorlage herunterladen oder eine eigene Tabelle als CSV speichern. Pflicht sind die Spalten **Titel** und **Datum**
+   (oder **Beginn** mit Datum und Uhrzeit); möglich sind außerdem Ende, Enddatum, Ganztägig, Ort, Beschreibung, Gruppen und ID.
+2. Datei hochladen. Die Vorschau zeigt jeden Termin mit Zustand: neu, schon importiert oder fehlerhaft mit Grund.
+3. Empfänger wählen (alle, Gruppen oder Personen), Push und Erinnerung festlegen und den Import bestätigen.
+
+Das Gateway merkt sich angelegte Termine über die Spalte ID, ersatzweise über Titel, Beginn und Ende. Ein erneuter
+Import derselben Datei legt nur neue Zeilen an; vorhandene Termine werden nicht geändert. Der Import nutzt die
+Schnittstelle `api/v2/events` und braucht den persönlichen Accesskey eines System-Benutzers, der in DIVERA Termine
+erstellen darf. Im Gateway ist dafür das Recht „Von Hand an DIVERA senden" nötig.
+
 ## Benutzer und Rechte
 
 Unter „Benutzer" legst du Konten an und vergibst Rechte je Bereich:

@@ -84,5 +84,11 @@
   <p class="hint">Regeln werden nach Rang geprüft, kleinste Zahl zuerst.</p>
 </div>
 {% endif %}
+{% if perm.send %}
+<div class="card">
+  <div class="row"><h2>Termine</h2><a class="btn light" href="/tenants/{{ tenant.id }}/events">Termine aus CSV importieren</a></div>
+  <p class="hint">Legt Termine aus einer Tabelle (z. B. Dienstplan aus Excel) in DIVERA an, mit Vorschau vor dem Import.</p>
+</div>
+{% endif %}
 {% if perm.logs %}<p><a href="/logs?tenant={{ tenant.id }}">Protokoll dieser Löschgruppe</a></p>{% endif %}
 {% endblock %}

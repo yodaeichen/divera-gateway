@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Termine importieren <span class="hint">({{ tenant.name }})</span></h1>
+{% if not tenant.accesskey_user_enc %}<div class="flash err">Der Import läuft über die neuere DIVERA-Schnittstelle. Dafür fehlt bei dieser Löschgruppe der persönliche Accesskey eines System-Benutzers, der in DIVERA Termine erstellen darf.</div>{% endif %}
+<div class="card">
+  <h2>CSV-Datei hochladen</h2>
+  <form method="post" action="/tenants/{{ tenant.id }}/events/upload" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Datei</label><input type="file" name="file" accept=".csv,text/csv" required>
+    <p class="hint">Höchstens {{ max_rows }} Termine je Datei. Nach dem Hochladen siehst du zuerst eine Vorschau; angelegt wird erst nach deiner Bestätigung.</p>
+    <div class="actions"><button>Hochladen und Vorschau zeigen</button><a class="btn light" href="/static/termine-vorlage.csv" download>Vorlage herunterladen</a>
+      <a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zur Löschgruppe</a></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>So muss die Datei aussehen</h2>
+  <p>Eine Tabelle mit Überschriften in der ersten Zeile, aus Excel gespeichert als „CSV (Trennzeichen-getrennt)". Semikolon, Komma und Tabulator werden als Trennzeichen erkannt. Die Reihenfolge der Spalten ist egal, überzählige Spalten werden ignoriert.</p>
+  <table>
+    <tr><th>Spalte</th><th>Pflicht</th><th>Inhalt</th><th>Erkannte Überschriften</th></tr>
+    <tr><td><strong>Titel</strong></td><td>ja</td><td>Name des Termins</td><td class="detail">{{ columns.title|join(', ') }}</td></tr>
+    <tr><td><strong>Datum</strong></td><td>ja</td><td>Tag des Termins, z. B. <code>14.01.2027</code> oder <code>2027-01-14</code></td><td class="detail">{{ columns.date|join(', ') }}</td></tr>
+    <tr><td><strong>Beginn</strong></td><td>nein</td><td>Uhrzeit wie <code>19:00</code>. Darf auch Datum und Uhrzeit zusammen enthalten (<code>14.01.2027 19:00</code>), dann ist die Spalte Datum nicht nötig. Ohne Uhrzeit wird der Termin ganztägig.</td><td class="detail">{{ columns.start|join(', ') }}</td></tr>
+    <tr><td><strong>Ende</strong></td><td>nein</td><td>Uhrzeit oder Datum mit Uhrzeit. Fehlt sie, werden {{ hours }} Stunden angenommen.</td><td class="detail">{{ columns.end|join(', ') }}</td></tr>
+    <tr><td><strong>Enddatum</strong></td><td>nein</td><td>Letzter Tag bei mehrtägigen Terminen</td><td class="detail">{{ columns.enddate|join(', ') }}</td></tr>
+    <tr><td><strong>Ganztägig</strong></td><td>nein</td><td><code>ja</code> oder <code>x</code> für ganztägige Termine</td><td class="detail">{{ columns.fullday|join(', ') }}</td></tr>
+    <tr><td><strong>Ort</strong></td><td>nein</td><td>Treffpunkt oder Adresse</td><td class="detail">{{ columns.address|join(', ') }}</td></tr>
+    <tr><td><strong>Beschreibung</strong></td><td>nein</td><td>Weitere Informationen</td><td class="detail">{{ columns.text|join(', ') }}</td></tr>
+    <tr><td><strong>Gruppen</strong></td><td>nein</td><td>Namen von DIVERA-Gruppen, mehrere mit Semikolon oder Komma. Nur diese Gruppen sehen den Termin. Die Namen müssen zur geladenen Empfängerliste passen.</td><td class="detail">{{ columns.groups|join(', ') }}</td></tr>
+    <tr><td><strong>ID</strong></td><td>nein</td><td>Eigene Kennung je Termin. Daran erkennt das Gateway, was schon importiert wurde. Ohne ID gelten Titel, Beginn und Ende zusammen als Kennung.</td><td class="detail">{{ columns.id|join(', ') }}</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Bisher importiert <span class="tag">{{ total }}</span></h2>
+  <table>
+    <tr><th>Termin</th><th>Wann</th><th>Importiert am</th><th>Von</th></tr>
+    {% for e in recent %}<tr><td><strong>{{ e.title }}</strong></td><td>{{ e.when }}</td><td>{{ e.imported_at|localtime }}</td><td>{{ e.imported_by }}</td></tr>
+    {% else %}<tr><td colspan="4">Noch nichts importiert.</td></tr>{% endfor %}
+  </table>
+  <p class="hint">Das Gateway merkt sich jeden angelegten Termin. Lädst du dieselbe Datei später mit neuen Zeilen noch einmal hoch, werden nur die neuen angelegt. Bereits angelegte Termine werden dabei nicht geändert; Änderungen nimmst du direkt in DIVERA vor.</p>
+</div>
+{% endblock %}

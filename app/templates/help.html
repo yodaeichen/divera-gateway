@@ -105,6 +105,14 @@
   <details><summary>Mehrere Regeln passen auf dieselbe Nachricht. Was passiert?</summary>
     <p>Regeln werden nach Rang geprüft, kleinste Zahl zuerst. Ist bei der ersten passenden Regel „Nach dieser Regel keine weiteren Regeln prüfen" angekreuzt, bleibt es bei dieser einen Meldung. Sonst lösen auch die folgenden passenden Regeln aus.</p></details>
 
+  <h3>Termine</h3>
+  <details><summary>Wie bringe ich einen Dienstplan nach DIVERA?</summary>
+    <p>Auf der Seite der Löschgruppe „Termine aus CSV importieren" öffnen. Dort die Vorlage herunterladen oder die eigene Tabelle aus Excel als CSV speichern, hochladen und die Vorschau prüfen. Angelegt wird erst nach deiner Bestätigung.</p></details>
+  <details><summary>Was passiert, wenn ich dieselbe Datei noch einmal hochlade?</summary>
+    <p>Das Gateway erkennt bereits angelegte Termine an der Spalte „ID", ersatzweise an Titel, Beginn und Ende, und überspringt sie. Nur neue Zeilen werden angelegt. Geänderte Termine werden nicht aktualisiert; das machst du direkt in DIVERA.</p></details>
+  <details><summary>Die Vorschau zeigt bei einer Zeile „Fehler".</summary>
+    <p>Der Grund steht daneben, etwa ein nicht erkanntes Datum, ein fehlender Titel oder ein Gruppenname, den es in der geladenen DIVERA-Liste nicht gibt. Fehlerhafte Zeilen werden übersprungen; nach der Korrektur die Datei einfach erneut hochladen.</p></details>
+
   <h3>Fehlermeldungen</h3>
   <details><summary>DIVERA antwortet mit „HTTP 403 Nicht autorisiert".</summary>
     <p>Bei Mitteilungen ohne Push darf der System-Benutzer in DIVERA keine Mitteilungen erstellen, oder es ist kein persönlicher Accesskey hinterlegt. „Schlüssel prüfen" auf der Seite der Löschgruppe zeigt, ob beide Schlüssel angenommen werden. Wird der Schlüssel angenommen und das Senden trotzdem abgelehnt, fehlt das Recht in DIVERA.</p></details>

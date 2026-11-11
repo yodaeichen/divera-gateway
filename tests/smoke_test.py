@@ -2,6 +2,8 @@
 
 Aufruf:  python tests/smoke_test.py
 """
+import datetime as dt
+import json
 import os
 import re
 import sys
@@ -559,6 +561,101 @@ with TestClient(app, base_url="http://testserver") as c:
     # ohne Einladung weiterhin mit festem Passwort
     c.post("/users/save", data=dict(NEWU, username="neu3", password="festes-passwort-1", email="neu3@wehr.example"))
     assert "FF Musterstadt" in login("neu3", "festes-passwort-1")[2] and len(outbox) == 3
+
+    # ---------- Termine aus CSV ----------
+    from app import events
+    assert events.split_datetime("24.12.2026 19:00") == (dt.date(2026, 12, 24), dt.time(19, 0), "")
+    assert events.split_datetime("2027-01-14T07:30:00")[:2] == (dt.date(2027, 1, 14), dt.time(7, 30))
+    assert events.split_datetime("19 Uhr")[:2] == (None, dt.time(19, 0)) and events.split_datetime("19.30")[:2] == (None, dt.time(19, 30))
+    assert events.split_datetime("5.2.27")[0] == dt.date(2027, 2, 5) and events.split_datetime("morgen")[2] and events.split_datetime("25:00")[2]
+    CSV = ("Titel;Datum;Beginn;Ende;Ort;Beschreibung;Gruppen;ID\r\n"
+           "Übungsdienst Atemschutz;14.01.2027;19:00;21:30;Gerätehaus;Belastungsübung;;2027-001\r\n"
+           "Jahreshauptversammlung;05.02.2027;20:00;;DGH;;Löschzug 1, Führung;2027-002\r\n"
+           "Zeltlager;17.07.2027;;;Zeltplatz;;;2027-003\r\n"
+           "Nachtübung;20.03.2027;22:00;01:00;;;;\r\n"
+           ";01.04.2027;18:00;;;;;\r\n"
+           "Kaputtes Datum;irgendwann;18:00;;;;;\r\n"
+           "Falsche Gruppe;02.04.2027;18:00;19:00;;;Gibtsnicht;\r\n"
+           "\r\n")
+    look = {"löschzug 1": 12, "führung": 13}
+    parsed_csv = events.parse_csv(CSV.encode("cp1252"), look)     # Excel-Kodierung
+    rws = parsed_csv["rows"]
+    assert not parsed_csv["error"] and len(rws) == 7 and events.parse_csv(CSV.encode("utf-8-sig"), look)["rows"] == rws
+    berlin = events.TZ
+    assert rws[0]["ts_start"] == int(dt.datetime(2027, 1, 14, 19, 0, tzinfo=berlin).timestamp()) and rws[0]["when"] == "14.01.2027 19:00 bis 21:30"
+    assert rws[0]["key"] == "2027-001" and rws[0]["address"] == "Gerätehaus" and not rws[0]["errors"] and not rws[0]["fullday"]
+    assert rws[1]["group_ids"] == [12, 13] and rws[1]["ts_end"] - rws[1]["ts_start"] == 7200 and "2 Stunden angenommen" in rws[1]["notes"][0]
+    assert rws[2]["fullday"] and rws[2]["when"] == "17.07.2027, ganztägig" and rws[2]["ts_end"] - rws[2]["ts_start"] == 23 * 3600 + 59 * 60
+    assert rws[3]["ts_end"] - rws[3]["ts_start"] == 3 * 3600 and rws[3]["key"].startswith("gw-") and "Folgetag" in rws[3]["notes"][0]
+    assert rws[4]["errors"] == ["Titel fehlt"] and "kein erkennbares Datum" in rws[5]["errors"][0] and "Gibtsnicht" in rws[6]["errors"][0]
+    assert events.parse_csv(b"Name,Wann\nx,y")["error"].startswith("Keine Spalte für den Titel") and events.parse_csv(b"")["error"]
+    comma = events.parse_csv("Termin,Beginn,Ende\nDienst,2027-03-01 18:00,2027-03-01 20:00\n".encode())["rows"][0]
+    assert comma["when"] == "01.03.2027 18:00 bis 20:00" and not comma["errors"]
+    dup = events.parse_csv("Titel;Datum;ID\nA;01.03.2027;7\nB;02.03.2027;7\n".encode())["rows"]
+    assert dup[1]["errors"] == ["kommt in der Datei doppelt vor"]
+    ev = events.build_event(rws[0], {"audience": "all", "push": False})
+    assert ev == {"Event": {"foreign_id": "2027-001", "title": "Übungsdienst Atemschutz", "ts_start": rws[0]["ts_start"], "ts_end": rws[0]["ts_end"],
+                            "fullday": False, "send_push": False, "send_sms": False, "send_call": False, "send_mail": False, "send_pager": False,
+                            "text": "Belastungsübung", "address": "Gerätehaus", "notification_type": 2}, "instructions": {}}, ev
+    ev2 = events.build_event(rws[1], {"audience": "persons", "ucr_ids": [501], "push": True, "reminder_hours": 24})
+    assert ev2["Event"]["notification_type"] == 3 and ev2["Event"]["group"] == [12, 13] and "user_cluster_relation" not in ev2["Event"]
+    assert ev2["Reminder"] == {"ts": rws[1]["ts_start"] - 86400, "send_push": True, "send_mail": False} and ev2["Event"]["send_push"] is True
+    ev3 = events.build_event(rws[0], {"audience": "persons", "ucr_ids": [501]})
+    assert ev3["Event"]["notification_type"] == 4 and ev3["Event"]["user_cluster_relation"] == [501] and ev3["instructions"] == {"user_cluster_relation": {"mapping": "id"}}
+
+    with m.SessionLocal() as db:   # Gruppenliste und persönlicher Schlüssel der Löschgruppe 1 für den Ablauf
+        t1 = db.get(m.Tenant, 1); t1.directory = json.dumps(parsed); t1.accesskey_user_enc = __import__("app.security", fromlist=["x"]).encrypt("persoenlich456"); db.commit()
+    evpage = c.get("/tenants/1/events").text
+    assert "CSV-Datei hochladen" in evpage and "termine-vorlage.csv" in evpage and "Noch nichts importiert" in evpage
+    vorlage = c.get("/static/termine-vorlage.csv").content
+    assert not any(r["errors"] for r in events.parse_csv(vorlage)["rows"]) and len(events.parse_csv(vorlage)["rows"]) == 3
+    assert "Bitte eine CSV-Datei auswählen" in c.post("/tenants/1/events/upload", data={"csrf": tok}).text
+    assert "Keine Spalte für den Titel" in c.post("/tenants/1/events/upload", data={"csrf": tok}, files={"file": ("x.csv", b"a;b\n1;2")}).text
+    assert c.post("/tenants/1/events/upload", data={}, files={"file": ("x.csv", CSV.encode())}).status_code == 403
+    prev = c.post("/tenants/1/events/upload", data={"csrf": tok}, files={"file": ("dienstplan.csv", CSV.encode("cp1252"))})
+    assert "/events/batch/1" in str(prev.url) and "Vorschau: dienstplan.csv" in prev.text
+    assert "4 Termine in DIVERA anlegen" in prev.text and "Titel fehlt" in prev.text and "Löschzug 1, Führung" in prev.text and "Muster, Max" in prev.text
+    posted = []
+    def fake_send(key, payload):
+        posted.append((key, payload))
+        return (False, "HTTP 500: kaputt") if payload["Event"]["title"] == "Zeltlager" else (True, 'HTTP 200: {"success":true}')
+    real_event_send, events.send_event = events.send_event, fake_send
+    assert "mindestens eine Person ankreuzen" in c.post("/events/batch/1/import", data={"csrf": tok, "audience": "persons"}).text and not posted
+    res = c.post("/events/batch/1/import", data={"csrf": tok, "audience": "persons", "ucr": ["501"], "reminder_hours": "24"})
+    assert "3 Termine in DIVERA angelegt" in res.text and "1 fehlgeschlagen" in res.text and "HTTP 500: kaputt" in res.text
+    assert [p[0] for p in posted] == ["persoenlich456"] * 4 and len(posted) == 4, "nur die fehlerfreien Zeilen, mit dem persönlichen Schlüssel"
+    assert posted[0][1]["Event"]["user_cluster_relation"] == [501] and posted[1][1]["Event"]["group"] == [12, 13] and posted[0][1]["Event"]["send_push"] is False
+    assert posted[0][1]["Reminder"]["ts"] == rws[0]["ts_start"] - 86400
+    with m.SessionLocal() as db:
+        assert {e.key for e in db.query(m.ImportedEvent)} == {"2027-001", "2027-002", rws[3]["key"]} and db.query(m.ImportBatch).count() == 1
+    again_prev = c.get("/events/batch/1").text
+    assert "1 Termin in DIVERA anlegen" in again_prev and again_prev.count("schon importiert</span>") == 3
+    posted.clear()
+    events.send_event = lambda key, payload: posted.append(payload) or (True, "HTTP 200: ok")
+    assert "1 Termin in DIVERA angelegt" in c.post("/events/batch/1/import", data={"csrf": tok}).text and len(posted) == 1
+    assert posted[0]["Event"]["title"] == "Zeltlager" and posted[0]["Event"]["notification_type"] == 2 and "Reminder" not in posted[0]
+    with m.SessionLocal() as db:
+        assert db.query(m.ImportBatch).count() == 0 and db.query(m.ImportedEvent).count() == 4, "erledigte Datei wird gelöscht"
+    assert c.get("/events/batch/1").status_code == 404
+    # dieselbe Datei noch einmal: nichts Neues
+    prev2 = c.post("/tenants/1/events/upload", data={"csrf": tok}, files={"file": ("dienstplan.csv", CSV.encode())})
+    assert "0 Termine in DIVERA anlegen" in prev2.text
+    assert "kein neuer Termin" in c.post(str(prev2.url).replace("http://testserver", "") + "/import", data={"csrf": tok}).text
+    assert "Übungsdienst Atemschutz" in c.get("/tenants/1/events").text and "Terminimport" in c.get("/logs").text
+    # DIVERA lehnt den Schlüssel ab: sofort abbrechen statt alle Zeilen durchzuprobieren
+    posted.clear()
+    events.send_event = lambda key, payload: posted.append(1) or (False, 'HTTP 403: {"message":"Nicht autorisiert"}')
+    r403 = c.post("/tenants/1/events/upload", data={"csrf": tok}, files={"file": ("neu.csv", "Titel;Datum\nA;01.05.2027\nB;02.05.2027\nC;03.05.2027\n".encode())})
+    stop = c.post(str(r403.url).replace("http://testserver", "") + "/import", data={"csrf": tok})
+    assert len(posted) == 1 and "2 nicht mehr versucht" in stop.text and "trotzdem abgelehnt" in stop.text
+    events.send_event = real_event_send
+    # Rechte: ohne Senderecht kein Import, fremde Löschgruppe unsichtbar
+    assert n1.get("/tenants/1/events").status_code == 403 and "Termine aus CSV importieren" not in n1.get("/tenants/1").text
+    assert e.get("/tenants/1/events").status_code == 200 and e.get("/tenants/2/events").status_code == 404
+    c.post("/tenants/2/events/upload", data={"csrf": tok}, files={"file": ("fremd.csv", "Titel;Datum\nFremd;01.06.2027\n".encode())})
+    with m.SessionLocal() as db:
+        foreign_batch = db.query(m.ImportBatch).filter_by(tenant_id=2).one().id
+    assert e.get(f"/events/batch/{foreign_batch}").status_code == 404 and e.post(f"/events/batch/{foreign_batch}/import", data={"csrf": et}).status_code == 404
 
     # Rechte wirken sofort, auch in laufenden Sitzungen
     c.post("/users/save", data=dict(VIEW, id=str(leser_id), p_rules="0", tenant=["2"]))

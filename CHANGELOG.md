@@ -2,6 +2,12 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.23.0
+
+- Termine aus einer CSV-Datei in DIVERA anlegen: Hochladen, Vorschau mit Prüfung jeder Zeile, Import nach Bestätigung
+- Vorlage zum Herunterladen, Erkennung gängiger Spaltenüberschriften und Datumsformate
+- Bereits importierte Termine werden erkannt und nicht doppelt angelegt
+
 ## 1.22.0
 
 - Umbenennung in der gesamten Oberfläche: „Kunde" heißt jetzt „Löschgruppe"

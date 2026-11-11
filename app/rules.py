@@ -256,10 +256,10 @@ def refusal_hint(tenant: m.Tenant, payload: dict, detail: str) -> str:
         return ""
     if tenant.accesskey_user_enc:
         return (" Hinweis: Gesendet wurde mit dem persönlichen Accesskey, DIVERA hat ihn trotzdem abgelehnt. Entweder ist es nicht der "
-                "persönliche Schlüssel dieses Benutzers, oder der Benutzer darf keine Mitteilungen erstellen. "
+                "persönliche Schlüssel dieses Benutzers, oder der Benutzer darf das in DIVERA nicht erstellen. "
                 "„Schlüssel prüfen“ bei der Löschgruppe zeigt, welcher Fall vorliegt.")
     return (" Hinweis: Gesendet wurde mit dem Alarm-Accesskey der Einheit, weil kein persönlicher Accesskey hinterlegt ist. Die "
-            "v2-Schnittstelle verlangt den persönlichen Accesskey eines Benutzers, der Mitteilungen schreiben darf: bei der Löschgruppe eintragen.")
+            "v2-Schnittstelle verlangt den persönlichen Accesskey eines Benutzers mit Schreibrecht in DIVERA: bei der Löschgruppe eintragen.")
 
 
 def check_key(accesskey: str) -> dict:

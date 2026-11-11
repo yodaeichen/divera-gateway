@@ -151,6 +151,30 @@ class Processed(Base):
     ts: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class ImportBatch(Base):
+    """Hochgeladene Terminliste zwischen Vorschau und Import. Wird nach dem Import oder nach einem Tag gelöscht."""
+    __tablename__ = "import_batches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(Integer)
+    created: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    filename: Mapped[str] = mapped_column(String(200), default="")
+    rows: Mapped[str] = mapped_column(Text, default="[]")
+
+
+class ImportedEvent(Base):
+    """Merkt, welche Termine schon in DIVERA angelegt wurden, damit ein erneuter Import nichts verdoppelt."""
+    __tablename__ = "imported_events"
+    __table_args__ = (UniqueConstraint("tenant_id", "key"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    key: Mapped[str] = mapped_column(String(80))
+    title: Mapped[str] = mapped_column(String(100), default="")
+    when: Mapped[str] = mapped_column(String(60), default="")
+    imported_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    imported_by: Mapped[str] = mapped_column(String(80), default="")
+
+
 # Spalten, die nach der ersten Version dazugekommen sind. Bestehende Datenbanken werden beim Start ergänzt.
 ADDED_COLUMNS = {
     "users": {"perms": "TEXT", "all_tenants": "BOOLEAN DEFAULT 1", "tenant_ids": "TEXT DEFAULT ''",

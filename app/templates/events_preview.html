@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ 'Ergebnis des Imports' if results is not none else 'Vorschau' }}: {{ batch.filename or 'Termine' }} <span class="hint">({{ tenant.name }})</span></h1>
+
+{% if results is not none %}
+<div class="flash {{ 'err' if failed or skipped else '' }}"><strong>{{ created }} {{ 'Termin' if created == 1 else 'Termine' }} in DIVERA angelegt</strong>{% if failed %}, {{ failed }} fehlgeschlagen{% endif %}{% if skipped %}, {{ skipped }} nicht mehr versucht, weil DIVERA den Schlüssel abgelehnt hat{% endif %}.{{ hint }}</div>
+<div class="card">
+  <table>
+    <tr><th>Zeile</th><th>Termin</th><th>Wann</th><th>Geht an</th><th>Ergebnis</th><th>Antwort von DIVERA</th></tr>
+    {% for r in results %}
+    <tr><td>{{ r.row.line }}</td><td><strong>{{ r.row.title }}</strong></td><td>{{ r.row.when }}</td><td>{{ r.audience }}</td>
+      <td><span class="tag {{ 'gesendet' if r.ok else 'fehler' }}">{{ 'angelegt' if r.ok else 'fehlgeschlagen' }}</span></td><td class="detail">{{ r.detail }}</td></tr>
+    {% endfor %}
+  </table>
+  <div class="actions">{% if failed or skipped %}<a class="btn" href="/events/batch/{{ batch.id }}">Zurück zur Vorschau und erneut versuchen</a>{% endif %}
+    <a class="btn light" href="/tenants/{{ tenant.id }}/events">Weitere Datei importieren</a><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zur Löschgruppe</a></div>
+</div>
+{% else %}
+<div class="stats">
+  <div class="stat ok"><strong>{{ counts.neu }}</strong><span>neu,<br>werden angelegt</span></div>
+  <div class="stat"><strong>{{ counts.vorhanden }}</strong><span>schon importiert,<br>werden übersprungen</span></div>
+  <div class="stat {{ 'bad' if counts.fehler }}"><strong>{{ counts.fehler }}</strong><span>fehlerhaft,<br>werden übersprungen</span></div>
+</div>
+
+<div class="card">
+  <table>
+    <tr><th>Zeile</th><th>Termin</th><th>Wann</th><th>Ort</th><th>Gruppen</th><th>Zustand</th></tr>
+    {% for r in rows %}
+    <tr><td>{{ r.line }}</td><td><strong>{{ r.title or '(ohne Titel)' }}</strong>{% if r.text %}<br><span class="hint">{{ r.text[:120] }}</span>{% endif %}</td>
+      <td>{{ r.when }}{% for n in r.notes %}<br><span class="hint">{{ n }}</span>{% endfor %}</td><td>{{ r.address }}</td><td>{{ r.groups|join(', ') }}</td>
+      <td>{% if r.state == 'neu' %}<span class="tag gesendet">neu</span>{% elif r.state == 'vorhanden' %}<span class="tag">schon importiert</span>
+          {% else %}<span class="tag fehler">Fehler</span><br><span class="hint">{{ r.errors|join('; ') }}</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<form method="post" action="/events/batch/{{ batch.id }}/import">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="card">
+  <h2>Wer soll die Termine sehen?</h2>
+  {% if own_groups %}<p class="hint">Zeilen mit eigenem Eintrag in der Spalte „Gruppen" gehen an diese Gruppen. Die Auswahl hier gilt für alle übrigen Zeilen.</p>{% endif %}
+  <label class="check"><input type="radio" name="audience" value="all" checked> Alle Mitglieder der Einheit</label>
+  <label class="check"><input type="radio" name="audience" value="groups" {{ 'disabled' if not directory.groups }}> Nur diese Gruppen</label>
+  {% if directory.groups %}<div class="picklist">{% for g in directory.groups %}<label class="check"><input type="checkbox" name="grp" value="{{ g.id }}"> {{ g.name }}</label>{% endfor %}</div>{% endif %}
+  <label class="check"><input type="radio" name="audience" value="persons" {{ 'disabled' if not directory.persons }}> Nur diese Personen</label>
+  {% if directory.persons %}<div class="picklist">{% for p in directory.persons %}<label class="check"><input type="checkbox" name="ucr" value="{{ p.id }}"> {{ p.name }}</label>{% endfor %}</div>{% endif %}
+  {% if not directory.groups and not directory.persons %}<p class="hint">Für Gruppen oder Personen zuerst bei der Löschgruppe „Empfänger aus DIVERA laden".</p>{% endif %}
+
+  <h2 class="step">Benachrichtigung</h2>
+  <label class="check"><input type="checkbox" name="push"> Beim Anlegen eine Push-Nachricht je Termin senden</label>
+  <p class="hint">Aus ist bei einem Import meist richtig: Sonst bekommt jeder Empfänger für jeden der {{ counts.neu }} Termine eine eigene Nachricht.</p>
+  <label>Erinnerung vor dem Termin, in Stunden</label><input type="number" name="reminder_hours" min="0" max="720" placeholder="keine" style="max-width:160px">
+  <p class="hint">Leer lassen für keine Erinnerung. Mit z. B. 24 erinnert DIVERA einen Tag vorher per Push.</p>
+
+  <div class="actions">
+    <button {{ 'disabled' if not counts.neu }}>{{ counts.neu }} {{ 'Termin' if counts.neu == 1 else 'Termine' }} in DIVERA anlegen</button>
+    <a class="btn light" href="/tenants/{{ tenant.id }}/events">Abbrechen</a>
+  </div>
+  <p class="hint">Die Termine werden wirklich in DIVERA angelegt, auch wenn die Löschgruppe im Testmodus steht. Rückgängig machen lässt sich das nur in DIVERA selbst.</p>
+</div>
+</form>
+{% endif %}
+{% endblock %}

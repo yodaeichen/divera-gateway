@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as m
-from . import access, mailer, rules, sources, suggest, worker
+from . import access, events, mailer, rules, sources, suggest, worker
 from . import security as sec
 from .version import VERSION
 
@@ -386,6 +386,115 @@ async def tenant_delete(tid: int, request: Request, db: Session = Depends(get_db
     db.commit()
     flash(request, "Löschgruppe gelöscht.")
     return go("/")
+
+
+# ---------- Termine aus CSV importieren ----------
+
+def batch_for(db: Session, user: m.User, batch_id: int) -> tuple[m.ImportBatch, m.Tenant]:
+    batch = need(db.get(m.ImportBatch, batch_id))
+    return batch, tenant_for(db, user, batch.tenant_id)
+
+
+def mark_rows(db: Session, tenant: m.Tenant, rows: list[dict]) -> dict:
+    """Ergänzt jede Zeile um ihren Zustand: neu, schon importiert oder fehlerhaft."""
+    known = set(db.scalars(select(m.ImportedEvent.key).where(m.ImportedEvent.tenant_id == tenant.id)))
+    counts = {"neu": 0, "vorhanden": 0, "fehler": 0}
+    for row in rows:
+        row["state"] = "fehler" if row["errors"] else ("vorhanden" if row["key"] in known else "neu")
+        counts[row["state"]] += 1
+    return counts
+
+
+@app.get("/tenants/{tid}/events")
+def events_view(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
+    tenant = tenant_for(db, user, tid)
+    recent = db.scalars(select(m.ImportedEvent).where(m.ImportedEvent.tenant_id == tid).order_by(m.ImportedEvent.id.desc()).limit(15)).all()
+    total = db.scalar(select(func.count(m.ImportedEvent.id)).where(m.ImportedEvent.tenant_id == tid))
+    return page(request, "events.html", user, tenant=tenant, recent=recent, total=total, labels=events.LABELS, columns=events.COLUMNS,
+                max_rows=events.MAX_ROWS, hours=events.DEFAULT_HOURS)
+
+
+@app.post("/tenants/{tid}/events/upload")
+async def events_upload(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
+    form = await read_form(request)
+    tenant = tenant_for(db, user, tid)
+    upload = form.get("file")
+    raw = await upload.read() if hasattr(upload, "read") else b""
+    if not raw:
+        flash(request, "Bitte eine CSV-Datei auswählen.", "err")
+        return go(f"/tenants/{tid}/events")
+    lookup = {g["name"].lower(): g["id"] for g in directory_of(tenant)["groups"]}
+    parsed = events.parse_csv(raw, lookup)
+    if parsed["error"]:
+        flash(request, parsed["error"], "err")
+        return go(f"/tenants/{tid}/events")
+    batch = m.ImportBatch(tenant_id=tid, user_id=user.id, filename=str(getattr(upload, "filename", ""))[:200],
+                          rows=json.dumps(parsed["rows"], ensure_ascii=False))
+    db.add(batch)
+    db.commit()
+    return go(f"/events/batch/{batch.id}")
+
+
+@app.get("/events/batch/{bid}")
+def events_preview(bid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
+    batch, tenant = batch_for(db, user, bid)
+    rows = json.loads(batch.rows)
+    counts = mark_rows(db, tenant, rows)
+    return page(request, "events_preview.html", user, tenant=tenant, batch=batch, rows=rows, counts=counts,
+                directory=directory_of(tenant), own_groups=any(r["group_ids"] for r in rows), results=None)
+
+
+def _import_rows(accesskey: str, rows: list[dict], options: dict) -> list[dict]:
+    """Legt die Termine nacheinander in DIVERA an. Bricht ab, sobald DIVERA den Schlüssel ablehnt."""
+    results = []
+    for row in rows:
+        payload = events.build_event(row, options)
+        ok, detail = events.send_event(accesskey, payload)
+        results.append({"row": row, "ok": ok, "detail": detail, "audience": events.audience_of(payload)})
+        if not ok and re.match(r"HTTP 40[13]\b", detail):
+            break
+        time.sleep(0.2)
+    return results
+
+
+@app.post("/events/batch/{bid}/import")
+async def events_import(bid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
+    form = await read_form(request)
+    batch, tenant = batch_for(db, user, bid)
+    rows = json.loads(batch.rows)
+    counts = mark_rows(db, tenant, rows)
+    todo = [r for r in rows if r["state"] == "neu"]
+    audience = form.get("audience") if form.get("audience") in ("groups", "persons") else "all"
+    options = {"audience": audience, "push": "push" in form,
+               "group_ids": [int(i) for i in rules.id_list(form.getlist("grp"))], "ucr_ids": [int(i) for i in rules.id_list(form.getlist("ucr"))],
+               "reminder_hours": int(form.get("reminder_hours")) if str(form.get("reminder_hours", "")).isdigit() else 0}
+    problem = ""
+    if not todo:
+        problem = "In dieser Datei ist kein neuer Termin zum Anlegen."
+    elif audience == "groups" and not options["group_ids"]:
+        problem = "Bitte mindestens eine Gruppe ankreuzen oder „alle Mitglieder“ wählen."
+    elif audience == "persons" and not options["ucr_ids"]:
+        problem = "Bitte mindestens eine Person ankreuzen oder „alle Mitglieder“ wählen."
+    if problem:
+        flash(request, problem, "err")
+        return go(f"/events/batch/{bid}")
+    results = await asyncio.to_thread(_import_rows, rules.key_for(tenant), todo, options)
+    created = [r for r in results if r["ok"]]
+    for item in created:
+        db.add(m.ImportedEvent(tenant_id=tenant.id, key=item["row"]["key"], title=item["row"]["title"], when=item["row"]["when"][:60],
+                               imported_by=user.username))
+    failed = [r for r in results if not r["ok"]]
+    skipped = len(todo) - len(results)
+    hint = rules.refusal_hint(tenant, {"News": {}}, failed[0]["detail"]) if failed else ""
+    db.add(m.Log(tenant_id=tenant.id, tenant_name=tenant.name, source_name="Terminimport", rule_name=batch.filename[:120],
+                 sender=user.username, subject=f"{len(created)} Termine angelegt, {len(failed)} fehlgeschlagen",
+                 status="gesendet" if created and not failed else ("fehler" if failed else "ignoriert"),
+                 detail=(failed[0]["detail"] + hint if failed else "")[:2000]))
+    if not failed and not skipped:
+        db.delete(batch)  # erledigt; die Datei wird nicht länger aufbewahrt
+    db.commit()
+    return page(request, "events_preview.html", user, tenant=tenant, batch=batch, rows=rows, counts=counts, directory=directory_of(tenant),
+                own_groups=False, results=results, created=len(created), failed=len(failed), skipped=skipped, hint=hint)
 
 
 # ---------- Quellen ----------

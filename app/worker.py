@@ -72,6 +72,7 @@ def prune():
     with m.SessionLocal() as db:
         db.execute(delete(m.Log).where(m.Log.ts < m.utcnow() - dt.timedelta(days=LOG_DAYS)))
         db.execute(delete(m.Processed).where(m.Processed.ts < m.utcnow() - dt.timedelta(days=7)))
+        db.execute(delete(m.ImportBatch).where(m.ImportBatch.created < m.utcnow() - dt.timedelta(days=1)))
         db.commit()
 
 
