@@ -2,6 +2,10 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.27.0
+
+- Startseite aufgeräumt: „Letzte Ereignisse" steht nicht mehr dort, sondern nur noch unter „Protokoll"
+
 ## 1.26.0
 
 - „Meldung senden": Benachrichtigungswege einzeln wählbar (Push, SMS, Sprachanruf, E-Mail, Pager), für Mitteilungen und Alarme

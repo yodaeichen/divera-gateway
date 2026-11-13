@@ -290,9 +290,6 @@ def admin_overview(db: Session, now: dt.datetime) -> dict:
 @app.get("/")
 def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     tenants = visible_tenants(db, user)
-    logs = []
-    if access.perms_of(user)["logs"]:
-        logs = db.scalars(select(m.Log).where(m.Log.tenant_id.in_([t.id for t in tenants])).order_by(m.Log.id.desc()).limit(15)).all()
     now, schedule = m.utcnow(), {}
     for tenant in tenants:  # letzter und nächster Abruf je Löschgruppe, über alle aktiven Postfächer
         pollable = [s for s in tenant.sources if s.active and s.type in sources.POLLERS]
@@ -303,7 +300,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = De
             info.update(next=min(upcoming), due=min(upcoming) <= now, interval=min(s.poll_interval for s in pollable))
         schedule[tenant.id] = info
     admin = admin_overview(db, now) if access.perms_of(user)["users"] == 2 else None
-    return page(request, "dashboard.html", user, tenants=tenants, logs=logs, schedule=schedule, admin=admin)
+    return page(request, "dashboard.html", user, tenants=tenants, schedule=schedule, admin=admin)
 
 
 @app.get("/tenants/new")

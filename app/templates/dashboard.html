@@ -23,7 +23,7 @@
 <tr><td colspan="7">{{ 'Noch keine Löschgruppe angelegt.' if sees_all else 'Dir ist noch keine Löschgruppe freigegeben.' }}</td></tr>
 {% endfor %}
 </table>
-<p class="hint">Diese Seite lädt sich alle 30 Sekunden neu.</p>
+<p class="hint">Diese Seite lädt sich alle 30 Sekunden neu.{% if perm.logs %} Eingegangene Nachrichten und ihr Ergebnis stehen im <a href="/logs">Protokoll</a>.{% endif %}</p>
 </div>
 {% if admin %}
 <div class="split2">
@@ -63,13 +63,6 @@
   </table>
   <p class="hint">Grün: in den letzten {{ admin.minutes }} Minuten aktiv. Wer sich abmeldet, verschwindet sofort; wer nur den Browser schließt, nach {{ admin.minutes }} Minuten. Diese Übersicht sehen nur Benutzer, die Benutzer und Rechte verwalten dürfen.</p>
 </div>
-</div>
-{% endif %}
-
-{% if perm.logs %}
-<div class="card">
-  <div class="row"><h2>Letzte Ereignisse</h2><a href="/logs">Ganzes Protokoll</a></div>
-  {% include "_logtable.html" %}
 </div>
 {% endif %}
 {% endblock %}

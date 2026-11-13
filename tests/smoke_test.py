@@ -332,7 +332,8 @@ with TestClient(app, base_url="http://testserver") as c:
     assert 'http-equiv="refresh"' not in c.get("/logs").text
     assert "Jetzt abrufen" in home and 'action="/tenants/1/poll"' in home
     r = c.post("/tenants/1/poll", data={"csrf": tok, "back": "home"})
-    assert "1 Postfach abgerufen, 1 neue Nachricht." in r.text and calls == ["a@b.de"] and "Alarm manuell" in r.text
+    assert "1 Postfach abgerufen, 1 neue Nachricht." in r.text and calls == ["a@b.de"] and "Alarm manuell" not in r.text
+    assert "Letzte Ereignisse" not in r.text and "Alarm manuell" in c.get("/logs").text, "Ereignisse stehen nur noch im Protokoll"
     assert "läuft gerade an" not in r.text and re.search(r"<td>\s*\d\d\.\d\d\.\d{4} \d\d:\d\d:\d\d\s*<br><span class=\"hint\">alle 30", r.text), "nächster Abruf als Uhrzeit"
     again = c.post("/tenants/1/poll", data={"csrf": tok}).text
     assert "0 neue Nachrichten" in again and "nach dem Anlegen oder letzten Speichern" in again, "dieselbe Nachricht nicht doppelt"
@@ -409,7 +410,7 @@ with TestClient(app, base_url="http://testserver") as c:
     # Betrachter, nur Löschgruppe 1
     v, vt, home = login("leser", "leser-passwort-1")
     assert "FF Musterstadt" in home and "Andere Wehr" not in home and "Löschgruppe anlegen" not in home and "Jetzt abrufen" not in home
-    assert "GEHEIM-FREMD" not in home and "Alarm Eigen" in home and ">Benutzer<" not in home and "Mein Konto" in home
+    assert "GEHEIM-FREMD" not in home and "Alarm Eigen" not in home and ">Benutzer<" not in home and "Mein Konto" in home
     assert "Angemeldet" not in home and "in 24 Stunden" not in home, "Übersicht nur für Administratoren"
     with m.SessionLocal() as db:
         ov = __import__("app.main", fromlist=["x"]).admin_overview(db, m.utcnow())
@@ -464,7 +465,7 @@ with TestClient(app, base_url="http://testserver") as c:
 
     # Angepasst: Regeln bearbeiten, kein Protokoll, alle Löschgruppen
     g, gt, ghome = login("eigen", "eigen-passwort-1")
-    assert "Andere Wehr" in ghome and "Letzte Ereignisse" not in ghome and ">Protokoll<" not in ghome
+    assert "Andere Wehr" in ghome and ">Protokoll<" not in ghome and 'href="/logs"' not in ghome
     assert g.get("/logs").status_code == 403 and g.get(f"/rules/{other_rule}/edit").status_code == 200
     assert "Protokoll dieser Löschgruppe" not in g.get("/tenants/2").text
 
