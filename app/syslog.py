@@ -5,7 +5,7 @@ from . import db as m
 
 log = logging.getLogger("gateway.syslog")
 LEVELS = [("fehler", "Fehler"), ("warnung", "Warnung"), ("info", "Hinweis")]
-CATEGORIES = ["Anmeldung", "Quelle", "DIVERA", "E-Mail-Versand", "Benutzer", "Löschgruppe", "Einstellungen", "Berechtigung", "System"]
+CATEGORIES = ["Anmeldung", "Quelle", "DIVERA", "E-Mail-Versand", "Benutzer", "Löschgruppe", "Einstellungen", "Berechtigung", "Sicherung", "Benachrichtigung", "System"]
 
 
 def event(level: str, category: str, message: str, detail: str = "", tenant: m.Tenant | None = None, actor: str = "") -> m.SystemEvent:

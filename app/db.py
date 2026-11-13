@@ -45,6 +45,7 @@ class User(Base):
     all_tenants: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     tenant_ids: Mapped[str] = mapped_column(Text, default="", server_default="")  # erlaubte Löschgruppen-IDs, mit Komma
     email: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    notify: Mapped[str] = mapped_column(Text, default="", server_default="")  # gewählte Benachrichtigungen als JSON-Liste (notify.py)
     # Einladung: nur der Hash des Einmal-Links wird gespeichert, mit Ablaufzeit
     invite_hash: Mapped[str] = mapped_column(String(64), default="", server_default="")
     invite_expires: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
@@ -196,7 +197,7 @@ class ImportedEvent(Base):
 ADDED_COLUMNS = {
     "users": {"perms": "TEXT", "all_tenants": "BOOLEAN DEFAULT 1", "tenant_ids": "TEXT DEFAULT ''",
               "last_login": "DATETIME", "last_seen": "DATETIME", "email": "VARCHAR(200) DEFAULT ''",
-              "invite_hash": "VARCHAR(64) DEFAULT ''", "invite_expires": "DATETIME"},
+              "invite_hash": "VARCHAR(64) DEFAULT ''", "invite_expires": "DATETIME", "notify": "TEXT DEFAULT ''"},
     "tenants": {"directory": "TEXT DEFAULT '{}'", "directory_ts": "DATETIME", "accesskey_user_enc": "TEXT DEFAULT ''"},
     "rules": {"ucr_ids": "VARCHAR(1000) DEFAULT ''", "group_ids": "VARCHAR(1000) DEFAULT ''", "push": "BOOLEAN DEFAULT 1"},
 }

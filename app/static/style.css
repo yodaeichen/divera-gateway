@@ -89,3 +89,12 @@ ol.steps { margin:0; padding-left:22px; } ol.steps li { padding:5px 0; }
 .tabs { display:flex; gap:6px; margin:0 0 -1px; } .tabs a { padding:8px 14px; border:1px solid var(--line); border-bottom:0; border-radius:8px 8px 0 0; background:#eef0f4; color:var(--ink); text-decoration:none; }
 .tabs a.on { background:#fff; font-weight:600; } .tabs + .card { border-top-left-radius:0; }
 .tag.warnung { background:#fff1d6; color:var(--warn); } .tag.info { background:#e8f0fb; color:#0b5cad; }
+
+.tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:14px; margin:6px 0 22px; }
+.tile { display:block; background:#fff; border:1px solid var(--line); border-radius:10px; padding:16px 18px; text-decoration:none; color:inherit; }
+.tile:hover { border-color:#8a94a6; box-shadow:0 2px 8px rgba(20,30,50,.08); }
+.tile strong { display:block; font-size:16px; margin-bottom:4px; } .tile span { font-size:13px; color:var(--muted); line-height:1.35; }
+.tile.alarm { border-left:4px solid #c8102e; }
+header { height:auto; min-height:54px; flex-wrap:wrap; gap:6px 14px; padding:6px 18px; }
+header .brand, header nav a, header button, header a.sponsor { white-space:nowrap; }
+header nav { gap:4px 12px; flex-wrap:wrap; font-size:14.5px; }

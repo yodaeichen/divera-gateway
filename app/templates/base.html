@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}DIVERA Gateway{% endblock %}</title>
 {% block head %}{% endblock %}
-<link rel="stylesheet" href="/static/style.css?v=25">
+<link rel="stylesheet" href="/static/style.css?v=28">
 </head>
 <body>
 {% if user %}
 <header>
   <a class="brand" href="/">DIVERA <span>Gateway</span><small>powered by yodaeichen</small></a>
-  <nav>{% if perm.send %}<a href="/alarms">Alarme</a><a href="/news">Mitteilungen</a><a href="/events">Termine</a>{% endif %}<a href="/">Löschgruppen</a>{% if perm.logs %}<a href="/logs">Protokoll</a>{% endif %}{% if perm.users == 2 %}<a href="/users">Benutzer</a><a href="/settings">Einstellungen</a>{% endif %}<a href="/account">Mein Konto</a><a href="/help">Hilfe</a></nav>
+  <nav><a href="/">Start</a>{% if perm.send %}<a href="/alarms">Alarme</a><a href="/news">Mitteilungen</a><a href="/events">Termine</a>{% endif %}<a href="/tenants">Löschgruppen</a>{% if perm.logs %}<a href="/logs">Protokoll</a>{% endif %}{% if perm.users == 2 %}<a href="/users">Benutzer</a><a href="/settings">Einstellungen</a>{% endif %}<a href="/account">Mein Konto</a><a href="/help">Hilfe</a></nav>
   <a class="sponsor" href="https://github.com/sponsors/yodaeichen" target="_blank" rel="noopener noreferrer" title="Das Projekt auf GitHub unterstützen"><span class="heart">&#9829;</span> Sponsor</a>
   <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Abmelden ({{ user.username }})</button></form>
 </header>

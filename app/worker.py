@@ -10,7 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from . import db as m
-from . import backup, rules, sources, syslog
+from . import backup, notify, rules, sources, syslog
 
 log = logging.getLogger("gateway.worker")
 LOG_DAYS = int(os.environ.get("LOG_DAYS", "30"))
@@ -105,7 +105,7 @@ def prune():
 
 async def loop():
     running: set[int] = set()
-    last_prune = 0.0
+    last_prune = last_notify = 0.0
     while True:
         try:
             now = m.utcnow()
@@ -118,6 +118,9 @@ async def loop():
                 running.add(sid)
                 task = asyncio.create_task(asyncio.to_thread(run_source, sid))
                 task.add_done_callback(lambda _t, sid=sid: running.discard(sid))
+            if time.time() - last_notify > notify.INTERVAL:
+                last_notify = time.time()
+                await asyncio.to_thread(notify.run)
             if time.time() - last_prune > 3600:
                 last_prune = time.time()
                 await asyncio.to_thread(prune)

@@ -12,4 +12,20 @@
     <div class="actions"><button>Passwort ändern</button></div>
   </form>
 </div>
+<div class="card">
+  <h2>Benachrichtigungen per E-Mail</h2>
+  {% if not mail_ready %}<div class="flash err">Der E-Mail-Versand des Gateways ist noch nicht eingerichtet. Bis ein Administrator das unter „Einstellungen" erledigt hat, wird nichts verschickt.</div>{% endif %}
+  <form method="post" action="/account/notify">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Deine E-Mail-Adresse</label><input type="text" name="email" value="{{ user.email or '' }}" placeholder="name@example.de" style="max-width:420px">
+    <p class="hint">An diese Adresse gehen die Benachrichtigungen und Links zum Festlegen des Passworts.</p>
+    <label>Benachrichtige mich bei</label>
+    {% for key, label, hint, admin_only in options %}
+    <label class="check"><input type="checkbox" name="notify" value="{{ key }}" {{ 'checked' if key in picked }}> {{ label }}</label>
+    <p class="hint">{{ hint }}{% if not admin_only %} Nur für Löschgruppen, die dir freigegeben sind.{% endif %}</p>
+    {% endfor %}
+    <p class="hint">Was innerhalb einer Minute anfällt, kommt gesammelt in einer Nachricht.</p>
+    <div class="actions"><button>Speichern</button><button class="light" name="send_test" value="1">Speichern und Probenachricht senden</button></div>
+  </form>
+</div>
 {% endblock %}

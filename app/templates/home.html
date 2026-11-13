@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block head %}<meta http-equiv="refresh" content="60">{% endblock %}
+{% block content %}
+<h1>Willkommen, {{ user.username }} <span class="hint">({{ role }})</span></h1>
+
+<div class="tiles">
+  {% if perm.send %}
+  <a class="tile alarm" href="/alarms"><strong>Alarm senden</strong><span>Einsatz mit Alarmton und Rückmeldung</span></a>
+  <a class="tile" href="/news"><strong>Mitteilung senden</strong><span>Information an Gruppen oder Personen</span></a>
+  <a class="tile" href="/events"><strong>Termine anlegen</strong><span>Dienstplan aus einer CSV-Datei einspielen</span></a>
+  {% endif %}
+  {% if perm.sources >= 1 or perm.rules >= 1 or perm.tenants >= 1 %}<a class="tile" href="/tenants"><strong>Löschgruppen</strong><span>Quellen und automatische Regeln</span></a>{% endif %}
+  {% if perm.logs %}<a class="tile" href="/logs"><strong>Protokoll</strong><span>Was an DIVERA übergeben wurde</span></a>{% endif %}
+  {% if perm.users == 2 %}<a class="tile" href="/users"><strong>Benutzer</strong><span>Zugänge und Rechte</span></a>
+  <a class="tile" href="/backup"><strong>Sicherung</strong><span>Einstellungen sichern</span></a>{% endif %}
+  <a class="tile" href="/account"><strong>Mein Konto</strong><span>Passwort und Benachrichtigungen{% if alerts %} ({{ alerts|length }} aktiv){% endif %}</span></a>
+  <a class="tile" href="/help">
+    <strong>Hilfe</strong><span>Erklärungen und häufige Fragen</span></a>
+</div>
+
+<div class="card">
+<h2>{{ 'Deine Löschgruppe' if tenants|length == 1 else 'Deine Löschgruppen' }}</h2>
+<table>
+<tr><th>Name</th><th>Status</th><th>Quellen</th><th>Letzter Abruf</th><th>Nächster Abruf</th><th></th></tr>
+{% for t in tenants %}
+<tr>
+  <td>{% if perm.sources >= 1 or perm.rules >= 1 or perm.tenants >= 1 %}<a href="/tenants/{{ t.id }}"><strong>{{ t.name }}</strong></a>{% else %}<strong>{{ t.name }}</strong>{% endif %}</td>
+  <td>{% if not t.active %}<span class="tag">inaktiv</span>{% elif t.test_mode %}<span class="tag test">Testmodus</span>{% else %}<span class="tag gesendet">scharf</span>{% endif %}</td>
+  <td>{% set errs = t.sources|selectattr('last_error')|list %}{% if errs %}<span class="tag fehler">{{ errs|length }} mit Fehler</span>{% elif t.sources %}<span class="tag gesendet">in Ordnung</span>{% else %}<span class="hint">keine</span>{% endif %}</td>
+  {% set plan = schedule[t.id] %}
+  <td>{{ plan.last|localtime if plan.last else 'noch nie' }}</td>
+  <td>{% if not plan.next %}<span class="hint">{{ 'Löschgruppe inaktiv' if not t.active else 'kein Postfach' }}</span>
+      {% elif plan.due %}läuft gerade an{% else %}{{ plan.next|localtime }}{% endif %}</td>
+  <td style="text-align:right">{% if perm.send %}<form method="post" action="/tenants/{{ t.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="home">
+    <button class="light" {{ 'disabled' if not t.active }}>Jetzt abrufen</button></form>{% endif %}</td>
+</tr>
+{% else %}
+<tr><td colspan="6">{{ 'Noch keine Löschgruppe angelegt.' if sees_all else 'Dir ist noch keine Löschgruppe freigegeben. Wende dich an einen Administrator.' }}</td></tr>
+{% endfor %}
+</table>
+</div>
+
+{% if perm.logs and tenants %}
+<div class="card">
+  <div class="row"><h2>Letzte Meldungen an DIVERA</h2><a class="btn light" href="/logs">Ganzes Protokoll</a></div>
+  <table>
+    <tr><th>Zeit</th><th>Löschgruppe</th><th>Betreff</th><th>Regel</th><th>Ergebnis</th></tr>
+    {% for l in recent %}
+    <tr><td style="white-space:nowrap">{{ l.ts|localtime }}</td><td>{{ l.tenant_name }}</td><td>{{ l.subject }}</td><td>{{ l.rule_name or l.source_name }}</td>
+      <td><span class="tag {{ l.status }}">{{ l.status }}</span></td></tr>
+    {% else %}<tr><td colspan="5">Noch nichts übergeben.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
+
+{% if admin %}
+<div class="split2">
+<div class="card">
+  <h2>Meldungen</h2>
+  <div class="stats">
+    {% set day = admin.windows[0][1] %}
+    <div class="stat ok"><strong>{{ day.get('gesendet', 0) }}</strong><span>erfolgreich<br>in 24 Stunden</span></div>
+    <div class="stat {{ 'bad' if day.get('fehler', 0) else '' }}"><strong>{{ day.get('fehler', 0) }}</strong><span>fehlgeschlagen<br>in 24 Stunden</span></div>
+  </div>
+  <table>
+    <tr><th>Ergebnis</th>{% for title, _ in admin.windows %}<th>{{ title }}</th>{% endfor %}</tr>
+    {% for key, label in admin.labels %}
+    <tr><td><span class="tag {{ key }}">{{ label }}</span></td>{% for _, numbers in admin.windows %}<td>{{ numbers.get(key, 0) }}</td>{% endfor %}</tr>
+    {% endfor %}
+  </table>
+  {% if admin.per_tenant %}
+  <h3>Je Löschgruppe, letzte 7 Tage</h3>
+  <table>
+    <tr><th>Löschgruppe</th><th>erfolgreich</th><th>fehlgeschlagen</th><th>Testmodus</th><th>ohne Regel</th></tr>
+    {% for name, numbers in admin.per_tenant %}
+    <tr><td>{{ name }}</td><td>{{ numbers.get('gesendet', 0) }}</td><td>{% if numbers.get('fehler', 0) %}<span class="tag fehler">{{ numbers.fehler }}</span>{% else %}0{% endif %}</td><td>{{ numbers.get('test', 0) }}</td><td>{{ numbers.get('ignoriert', 0) }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  <p class="hint">Gezählt werden die Einträge im Protokoll, auch Testsendungen von Hand. <a href="/logs?status=fehler">Fehlgeschlagene ansehen</a></p>
+  <p>Systemprotokoll: {% if admin.system_errors %}<span class="tag fehler">{{ admin.system_errors }} Fehler in 24 Stunden</span>{% else %}<span class="tag gesendet">keine Fehler in 24 Stunden</span>{% endif %} <a href="/logs?view=system">ansehen</a></p>
+</div>
+<div class="card">
+  <h2>Angemeldet <span class="tag {{ 'gesendet' if admin.online else '' }}">{{ admin.online }}</span></h2>
+  <table>
+    <tr><th>Benutzer</th><th>Rolle</th><th>Zuletzt aktiv</th><th>Letzte Anmeldung</th></tr>
+    {% for p in admin.people %}
+    <tr><td><span class="dot {{ 'on' if p.online }}"></span><strong>{{ p.name }}</strong>{% if p.name == user.username %} <span class="tag">du</span>{% endif %}</td>
+      <td>{{ p.role }}</td><td>{{ p.last_seen|localtime if p.last_seen else ('abgemeldet' if p.last_login else 'nie') }}</td><td>{{ p.last_login|localtime if p.last_login else 'nie' }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Grün: in den letzten {{ admin.minutes }} Minuten aktiv. Wer sich abmeldet, verschwindet sofort; wer nur den Browser schließt, nach {{ admin.minutes }} Minuten. Diese Übersicht sehen nur Benutzer, die Benutzer und Rechte verwalten dürfen.</p>
+</div>
+</div>
+{% endif %}
+<p class="hint">Diese Seite zeigt, was du nach deinen Rechten tun und sehen darfst, und lädt sich jede Minute neu.</p>
+{% endblock %}

@@ -419,11 +419,11 @@ with TestClient(app, base_url="http://testserver") as c:
         now = dt.datetime.now(dt.timezone.utc)
         return [{"id": "m-1", "from": "ls@x.de", "subject": "Alarm manuell", "body": body, "date": "", "ts": now}], {"since": "x"}
     sources.POLLERS["m365"] = fake_poll
-    home = c.get("/").text
+    home = c.get("/tenants").text
     assert "Nächster Abruf" in home and "läuft gerade an" in home and "alle 30 Sekunden" in home and 'http-equiv="refresh"' in home
     assert 'http-equiv="refresh"' not in c.get("/logs").text
     assert "Jetzt abrufen" in home and 'action="/tenants/1/poll"' in home
-    r = c.post("/tenants/1/poll", data={"csrf": tok, "back": "home"})
+    r = c.post("/tenants/1/poll", data={"csrf": tok, "back": "list"})
     assert "1 Postfach abgerufen, 1 neue Nachricht." in r.text and calls == ["a@b.de"] and "Alarm manuell" not in r.text
     assert "Letzte Ereignisse" not in r.text and "Alarm manuell" in c.get("/logs").text, "Ereignisse stehen nur noch im Protokoll"
     assert "läuft gerade an" not in r.text and re.search(r"<td>\s*\d\d\.\d\d\.\d{4} \d\d:\d\d:\d\d\s*<br><span class=\"hint\">alle 30", r.text), "nächster Abruf als Uhrzeit"
@@ -502,7 +502,7 @@ with TestClient(app, base_url="http://testserver") as c:
     # Betrachter, nur Löschgruppe 1
     v, vt, home = login("leser", "leser-passwort-1")
     assert "FF Musterstadt" in home and "Andere Wehr" not in home and "Löschgruppe anlegen" not in home and "Jetzt abrufen" not in home
-    assert "GEHEIM-FREMD" not in home and "Alarm Eigen" not in home and ">Benutzer<" not in home and "Mein Konto" in home
+    assert "GEHEIM-FREMD" not in home and "Alarm Eigen" in home and "Letzte Meldungen an DIVERA" in home and "Alarm senden" not in home and ">Benutzer<" not in home and "Mein Konto" in home
     assert "Angemeldet" not in home and "in 24 Stunden" not in home, "Übersicht nur für Administratoren"
     with m.SessionLocal() as db:
         ov = __import__("app.main", fromlist=["x"]).admin_overview(db, m.utcnow())
@@ -783,6 +783,73 @@ with TestClient(app, base_url="http://testserver") as c:
     with m.SessionLocal() as db:
         foreign_batch = db.query(m.ImportBatch).filter_by(tenant_id=2).one().id
     assert e.get(f"/events/batch/{foreign_batch}").status_code == 404 and e.post(f"/events/batch/{foreign_batch}/import", data={"csrf": et}).status_code == 404
+
+    # ---------- Startseite nach Rechten ----------
+    start = c.get("/").text
+    for label in ("Alarm senden", "Mitteilung senden", "Termine anlegen", "Sicherung", "Deine Löschgruppen", "Letzte Meldungen an DIVERA", "Angemeldet"):
+        assert label in start, label
+    assert 'href="/tenants">Löschgruppen</a>' in start and '<a href="/">Start</a>' in start and "Löschgruppe anlegen" not in start
+    assert "Löschgruppe anlegen" in c.get("/tenants").text and "Angemeldet" not in c.get("/tenants").text
+    estart, nstart = e.get("/").text, n1.get("/").text
+    assert "Alarm senden" in estart and "Deine Löschgruppe<" in estart and "Andere Wehr" not in estart and 'href="/backup"' not in estart
+    assert "Alarm senden" not in nstart and "Jetzt abrufen" not in nstart and "Mein Konto" in nstart and "Angemeldet" not in nstart
+
+    # ---------- Benachrichtigungen per E-Mail ----------
+    from app import notify, syslog
+    notify.INTERVAL = 10 ** 9   # der Hintergrunddienst soll dem Test keine Ereignisse wegnehmen
+    acc = e.get("/account").text
+    assert "Benachrichtigungen per E-Mail" in acc and 'value="transfer"' in acc and 'value="source"' in acc and 'value="system"' not in acc
+    assert 'value="system"' in c.get("/account").text
+    assert "bitte eine E-Mail-Adresse" in e.post("/account/notify", data={"csrf": et, "email": "", "notify": ["transfer"]}).text
+    assert "ungültig" in e.post("/account/notify", data={"csrf": et, "email": "kein-at", "notify": ["transfer"]}).text
+    assert "gespeichert" in e.post("/account/notify", data={"csrf": et, "email": "bearb@wehr.example", "notify": ["transfer", "source", "system", "quatsch"]}).text
+    c.post("/account/notify", data={"csrf": tok, "email": "chef@wehr.example", "notify": ["transfer", "source", "system"]})
+    with m.SessionLocal() as db:
+        bearb = db.query(m.User).filter_by(username="bearb").one()
+        assert json.loads(bearb.notify) == ["transfer", "source"] and bearb.email == "bearb@wehr.example", "Systemfehler nur für Administratoren"
+    posted, keep_deliver = [], mailer.deliver
+    mailer.deliver = lambda settings, to, subject, text_: posted.append((to, subject, text_))
+    try:
+        probe = e.post("/account/notify", data={"csrf": et, "email": "bearb@wehr.example", "notify": ["transfer", "source"], "send_test": "1"}).text
+        assert "Probenachricht an bearb@wehr.example verschickt" in probe and posted.pop()[1] == "DIVERA Gateway: Probenachricht"
+        notify.run(); posted.clear()   # Stand setzen: Altes wird nicht nachgemeldet
+        assert notify.run() == 0 and not posted
+        with m.SessionLocal() as db:
+            t1, t2 = db.get(m.Tenant, 1), db.get(m.Tenant, 2)
+            db.add(m.Log(tenant_id=1, tenant_name=t1.name, subject="Sperrung Hauptstr.", status="fehler", detail="HTTP 403: abgelehnt"))
+            db.add(m.Log(tenant_id=2, tenant_name=t2.name, subject="FREMDER-FEHLER", status="fehler", detail="HTTP 500"))
+            db.add(m.Log(tenant_id=1, tenant_name=t1.name, subject="Alles gut", status="gesendet", detail="HTTP 200"))
+            syslog.note(db, "fehler", "Quelle", "Abruf von „Probepostfach“ fehlgeschlagen", "ReadTimeout", tenant=t1)
+            syslog.note(db, "info", "Quelle", "Verbindung zu „Probepostfach“ funktioniert wieder", tenant=t1)
+            syslog.note(db, "fehler", "Sicherung", "Automatische Sicherung fehlgeschlagen", "Platte voll")
+            syslog.note(db, "fehler", "E-Mail-Versand", "Einladung konnte nicht verschickt werden", "SMTP")
+            syslog.note(db, "info", "Anmeldung", "jemand hat sich angemeldet")
+            db.commit()
+        assert notify.run() == 2 and len(posted) == 2, posted
+        mails = {to: (subject, text_) for to, subject, text_ in posted}
+        subj_e, body_e = mails["bearb@wehr.example"]
+        assert subj_e == "DIVERA Gateway: 3 Meldungen" and "Sperrung Hauptstr." in body_e and "HTTP 403" in body_e and "fehlgeschlagen" in body_e
+        assert "funktioniert wieder" in body_e and "FREMDER-FEHLER" not in body_e and "Sicherung" not in body_e and "Alles gut" not in body_e
+        subj_c, body_c = mails["chef@wehr.example"]
+        assert subj_c == "DIVERA Gateway: 5 Meldungen" and "FREMDER-FEHLER" in body_c and "Platte voll" in body_c and "/logs" in body_c
+        assert "Einladung konnte nicht" not in body_c and "angemeldet" not in body_c.replace("Mein Konto", "")
+        posted.clear()
+        assert notify.run() == 0 and not posted, "jedes Ereignis wird nur einmal gemeldet"
+        # Versand scheitert: einmal im Systemprotokoll vermerken, aber nicht wieder per Mail melden
+        def broken(*args):
+            raise RuntimeError("Mailserver nicht erreichbar")
+        mailer.deliver = broken
+        with m.SessionLocal() as db:
+            db.add(m.Log(tenant_id=1, tenant_name="FF Musterstadt", subject="Noch ein Fehler", status="fehler", detail="x")); db.commit()
+        assert notify.run() == 0 and "Benachrichtigung per E-Mail konnte nicht verschickt werden" in c.get("/logs?view=system").text
+        mailer.deliver = lambda settings, to, subject, text_: posted.append((to, subject, text_))
+        assert notify.run() == 0 and not posted
+        c.post("/account/notify", data={"csrf": tok, "email": "chef@wehr.example"})   # alles abwählen
+        with m.SessionLocal() as db:
+            db.add(m.Log(tenant_id=2, tenant_name="Andere Wehr", subject="Fehler ohne Empfänger", status="fehler", detail="x")); db.commit()
+        assert notify.run() == 0 and not posted
+    finally:
+        mailer.deliver = keep_deliver
 
     # ---------- Sicherung ----------
     import io, zipfile, sqlite3

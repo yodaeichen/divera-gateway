@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as m
-from . import access, backup, events, mailer, rules, sources, suggest, syslog, worker
+from . import access, backup, events, mailer, notify, rules, sources, suggest, syslog, worker
 from . import security as sec
 from .version import VERSION
 
@@ -287,10 +287,8 @@ def admin_overview(db: Session, now: dt.datetime) -> dict:
             "per_tenant": sorted(per_tenant.items()), "labels": STATUS_LABELS, "minutes": ONLINE_MINUTES}
 
 
-@app.get("/")
-def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
-    tenants = visible_tenants(db, user)
-    now, schedule = m.utcnow(), {}
+def poll_schedule(tenants: list[m.Tenant], now: dt.datetime) -> dict:
+    schedule = {}
     for tenant in tenants:  # letzter und nächster Abruf je Löschgruppe, über alle aktiven Postfächer
         pollable = [s for s in tenant.sources if s.active and s.type in sources.POLLERS]
         polled = [s.last_poll for s in pollable if s.last_poll]
@@ -299,8 +297,26 @@ def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = De
             upcoming = [s.last_poll + dt.timedelta(seconds=s.poll_interval) if s.last_poll else now for s in pollable]
             info.update(next=min(upcoming), due=min(upcoming) <= now, interval=min(s.poll_interval for s in pollable))
         schedule[tenant.id] = info
-    admin = admin_overview(db, now) if access.perms_of(user)["users"] == 2 else None
-    return page(request, "dashboard.html", user, tenants=tenants, schedule=schedule, admin=admin)
+    return schedule
+
+
+@app.get("/")
+def home(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    """Startseite: zeigt jedem Benutzer das, was er nach seinen Rechten tun und sehen darf."""
+    tenants, now, perms = visible_tenants(db, user), m.utcnow(), access.perms_of(user)
+    recent = []
+    if perms["logs"] and tenants:
+        recent = db.scalars(select(m.Log).where(m.Log.tenant_id.in_([t.id for t in tenants]), m.Log.status.in_(("gesendet", "fehler", "test")))
+                            .order_by(m.Log.id.desc()).limit(5)).all()
+    admin = admin_overview(db, now) if perms["users"] == 2 else None
+    return page(request, "home.html", user, tenants=tenants, schedule=poll_schedule(tenants, now), recent=recent, admin=admin,
+                role=access.role_of(user), alerts=notify.chosen(user))
+
+
+@app.get("/tenants")
+def dashboard(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    tenants = visible_tenants(db, user)
+    return page(request, "dashboard.html", user, tenants=tenants, schedule=poll_schedule(tenants, m.utcnow()))
 
 
 @app.get("/tenants/new")
@@ -406,7 +422,7 @@ async def tenant_poll(tid: int, request: Request, db: Session = Depends(get_db),
     """Fragt alle Postfächer einer Löschgruppe sofort ab, ohne auf das Intervall zu warten."""
     form = await read_form(request)
     tenant = tenant_for(db, user, tid)
-    back = "/" if form.get("back") == "home" else f"/tenants/{tid}"
+    back = {"home": "/", "list": "/tenants"}.get(str(form.get("back")), f"/tenants/{tid}")
     pollable = [s for s in tenant.sources if s.active and s.type in sources.POLLERS]
     if not tenant.active:
         flash(request, f"{tenant.name} ist inaktiv und wird nicht abgerufen.", "err")
@@ -434,7 +450,7 @@ async def tenant_delete(tid: int, request: Request, db: Session = Depends(get_db
     db.delete(gone)
     db.commit()
     flash(request, "Löschgruppe gelöscht.")
-    return go("/")
+    return go("/tenants")
 
 
 # ---------- Meldung von Hand senden (ohne Regel) ----------
@@ -1419,8 +1435,40 @@ async def users_delete(uid: int, request: Request, db: Session = Depends(get_db)
 
 
 @app.get("/account")
-def account_view(request: Request, user: m.User = Depends(current_user)):
-    return page(request, "account.html", user, role=access.role_of(user))
+def account_view(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    return page(request, "account.html", user, role=access.role_of(user), options=notify.available(user), picked=notify.chosen(user),
+                mail_ready=mailer.configured(mailer.load(db)))
+
+
+@app.post("/account/notify")
+async def account_notify(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    """Speichert die eigene E-Mail-Adresse und die gewählten Benachrichtigungen; auf Wunsch mit Probenachricht."""
+    form = await read_form(request)
+    address = text(form, "email", 200)
+    if address and not mailer.valid_address(address):
+        flash(request, "Die E-Mail-Adresse ist ungültig.", "err")
+        return go("/account")
+    allowed_keys = {option[0] for option in notify.available(user)}
+    picked = [key for key in form.getlist("notify") if key in allowed_keys]
+    if picked and not address:
+        flash(request, "Für Benachrichtigungen bitte eine E-Mail-Adresse eintragen.", "err")
+        return go("/account")
+    user.email, user.notify = address, json.dumps(picked)
+    db.add(user)
+    syslog.note(db, "info", "Benutzer", f"{user.username} hat die eigenen Benachrichtigungen geändert",
+                ", ".join(picked) or "keine", actor=user.username)
+    db.commit()
+    if "send_test" in form:
+        settings = mailer.load(db)
+        try:
+            await asyncio.to_thread(mailer.deliver, settings, address, "DIVERA Gateway: Probenachricht",
+                                    "Hallo,\n\nso sehen Benachrichtigungen des DIVERA Gateway aus. Der Versand an deine Adresse funktioniert.\n")
+            flash(request, f"Gespeichert. Probenachricht an {address} verschickt.")
+        except Exception as exc:
+            flash(request, f"Gespeichert, aber die Probenachricht ging nicht raus: {exc}", "err")
+        return go("/account")
+    flash(request, "Benachrichtigungen gespeichert.")
+    return go("/account")
 
 
 @app.post("/account")

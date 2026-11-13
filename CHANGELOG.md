@@ -2,6 +2,15 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 2.2.0
+
+- Neue Startseite, die sich nach den Rechten des Benutzers richtet: Kacheln für das, was er tun darf, Zustand seiner
+  Löschgruppen, die letzten Meldungen an DIVERA und für Administratoren die Übersicht über Anmeldungen und Zähler
+- Die Liste der Löschgruppen hat die eigene Adresse `/tenants` und bleibt über das Menü erreichbar
+- Benachrichtigungen per E-Mail: Jeder Benutzer wählt unter „Mein Konto", ob er bei fehlgeschlagener Übergabe an
+  DIVERA, bei Störungen eines Postfachs und (Administratoren) bei Fehlern des Gateways eine Nachricht bekommt;
+  dort lässt sich auch die eigene E-Mail-Adresse ändern und eine Probenachricht senden
+
 ## 2.1.0
 
 - Neue Seite „Sicherung" (unter Einstellungen, nur für Administratoren): die ganze Datenbank als ZIP herunterladen,

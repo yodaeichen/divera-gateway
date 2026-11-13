@@ -9,11 +9,19 @@ Aktuelle Version und Änderungen: siehe [CHANGELOG.md](CHANGELOG.md). Die laufen
 
 | Menüpunkt | Wofür |
 |---|---|
+| **Start** | Persönliche Startseite: Kacheln nach den eigenen Rechten, Zustand der Löschgruppen, letzte Meldungen |
 | **Alarme** | Alarm von Hand senden, Liste der zuletzt von Hand gesendeten Alarme |
 | **Mitteilungen** | Mitteilung von Hand senden, Liste der zuletzt gesendeten Mitteilungen |
 | **Termine** | Termine aus einer CSV-Datei in DIVERA anlegen |
 | **Löschgruppen** | Der automatische Betrieb: Quellen (Postfächer, Webhooks) und die Regeln, die daraus Meldungen machen |
 | **Protokoll** | Alles, was übergeben wurde, und das Systemprotokoll |
+
+### Benachrichtigungen per E-Mail
+
+Unter „Mein Konto" wählt jeder Benutzer, worüber ihn das Gateway per E-Mail informiert: fehlgeschlagene Übergaben an
+DIVERA, Störungen beim Abruf eines Postfachs (und deren Ende) sowie, nur für Administratoren, Fehler des Gateways
+selbst. Berichtet wird nur über Löschgruppen, die dem Benutzer freigegeben sind; was innerhalb einer Minute anfällt,
+kommt gesammelt in einer Nachricht. Voraussetzung ist der eingerichtete E-Mail-Versand unter „Einstellungen".
 
 ## Funktionen
 

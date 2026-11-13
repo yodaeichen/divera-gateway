@@ -16,7 +16,7 @@
   <td>{% if not plan.next %}<span class="hint">{{ 'Löschgruppe inaktiv' if not t.active else 'kein Postfach' }}</span>
       {% elif plan.due %}läuft gerade an{% else %}{{ plan.next|localtime }}{% endif %}
       {% if plan.interval %}<br><span class="hint">alle {{ plan.interval }} Sekunden</span>{% endif %}</td>
-  <td style="text-align:right">{% if perm.send %}<form method="post" action="/tenants/{{ t.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="home">
+  <td style="text-align:right">{% if perm.send %}<form method="post" action="/tenants/{{ t.id }}/poll"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="list">
     <button class="light" {{ 'disabled' if not t.active }}>Jetzt abrufen</button></form>{% endif %}</td>
 </tr>
 {% else %}
@@ -25,44 +25,4 @@
 </table>
 <p class="hint">Diese Seite lädt sich alle 30 Sekunden neu.{% if perm.logs %} Eingegangene Nachrichten und ihr Ergebnis stehen im <a href="/logs">Protokoll</a>.{% endif %}</p>
 </div>
-{% if admin %}
-<div class="split2">
-<div class="card">
-  <h2>Meldungen</h2>
-  <div class="stats">
-    {% set day = admin.windows[0][1] %}
-    <div class="stat ok"><strong>{{ day.get('gesendet', 0) }}</strong><span>erfolgreich<br>in 24 Stunden</span></div>
-    <div class="stat {{ 'bad' if day.get('fehler', 0) else '' }}"><strong>{{ day.get('fehler', 0) }}</strong><span>fehlgeschlagen<br>in 24 Stunden</span></div>
-  </div>
-  <table>
-    <tr><th>Ergebnis</th>{% for title, _ in admin.windows %}<th>{{ title }}</th>{% endfor %}</tr>
-    {% for key, label in admin.labels %}
-    <tr><td><span class="tag {{ key }}">{{ label }}</span></td>{% for _, numbers in admin.windows %}<td>{{ numbers.get(key, 0) }}</td>{% endfor %}</tr>
-    {% endfor %}
-  </table>
-  {% if admin.per_tenant %}
-  <h3>Je Löschgruppe, letzte 7 Tage</h3>
-  <table>
-    <tr><th>Löschgruppe</th><th>erfolgreich</th><th>fehlgeschlagen</th><th>Testmodus</th><th>ohne Regel</th></tr>
-    {% for name, numbers in admin.per_tenant %}
-    <tr><td>{{ name }}</td><td>{{ numbers.get('gesendet', 0) }}</td><td>{% if numbers.get('fehler', 0) %}<span class="tag fehler">{{ numbers.fehler }}</span>{% else %}0{% endif %}</td><td>{{ numbers.get('test', 0) }}</td><td>{{ numbers.get('ignoriert', 0) }}</td></tr>
-    {% endfor %}
-  </table>
-  {% endif %}
-  <p class="hint">Gezählt werden die Einträge im Protokoll, auch Testsendungen von Hand. <a href="/logs?status=fehler">Fehlgeschlagene ansehen</a></p>
-  <p>Systemprotokoll: {% if admin.system_errors %}<span class="tag fehler">{{ admin.system_errors }} Fehler in 24 Stunden</span>{% else %}<span class="tag gesendet">keine Fehler in 24 Stunden</span>{% endif %} <a href="/logs?view=system">ansehen</a></p>
-</div>
-<div class="card">
-  <h2>Angemeldet <span class="tag {{ 'gesendet' if admin.online else '' }}">{{ admin.online }}</span></h2>
-  <table>
-    <tr><th>Benutzer</th><th>Rolle</th><th>Zuletzt aktiv</th><th>Letzte Anmeldung</th></tr>
-    {% for p in admin.people %}
-    <tr><td><span class="dot {{ 'on' if p.online }}"></span><strong>{{ p.name }}</strong>{% if p.name == user.username %} <span class="tag">du</span>{% endif %}</td>
-      <td>{{ p.role }}</td><td>{{ p.last_seen|localtime if p.last_seen else ('abgemeldet' if p.last_login else 'nie') }}</td><td>{{ p.last_login|localtime if p.last_login else 'nie' }}</td></tr>
-    {% endfor %}
-  </table>
-  <p class="hint">Grün: in den letzten {{ admin.minutes }} Minuten aktiv. Wer sich abmeldet, verschwindet sofort; wer nur den Browser schließt, nach {{ admin.minutes }} Minuten. Diese Übersicht sehen nur Benutzer, die Benutzer und Rechte verwalten dürfen.</p>
-</div>
-</div>
-{% endif %}
 {% endblock %}
