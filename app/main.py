@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete, func, select
@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as m
-from . import access, events, mailer, rules, sources, suggest, syslog, worker
+from . import access, backup, events, mailer, rules, sources, suggest, syslog, worker
 from . import security as sec
 from .version import VERSION
 
@@ -1314,6 +1314,54 @@ async def invite_save(token: str, request: Request, db: Session = Depends(get_db
     db.commit()
     flash(request, "Passwort gespeichert. Du kannst dich jetzt anmelden.")
     return go("/login")
+
+
+# ---------- Sicherung ----------
+
+@app.get("/backup")
+def backup_view(request: Request, user: m.User = Depends(allow("users:2"))):
+    return page(request, "backup.html", user, items=backup.listing(), keep=backup.KEEP, hours=backup.AUTO_HOURS, folder=backup.DIR)
+
+
+@app.post("/backup/download")
+async def backup_download(request: Request, user: m.User = Depends(allow("users:2"))):
+    """Erzeugt eine frische Sicherung und liefert sie als Datei aus, auf Wunsch mit dem SECRET_KEY."""
+    form = await read_form(request)
+    with_key = "with_key" in form
+    name, data = await asyncio.to_thread(backup.build, with_key)
+    syslog.record("warnung" if with_key else "info", "Sicherung",
+                  "Sicherung heruntergeladen" + (" (mit SECRET_KEY)" if with_key else ""), name, actor=user.username)
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+
+@app.post("/backup/store")
+async def backup_store(request: Request, user: m.User = Depends(allow("users:2"))):
+    await read_form(request)
+    try:
+        name = await asyncio.to_thread(backup.store)
+    except Exception as exc:
+        syslog.record("fehler", "Sicherung", "Sicherung auf dem Server fehlgeschlagen", f"{type(exc).__name__}: {exc}", actor=user.username)
+        flash(request, f"Die Sicherung konnte nicht abgelegt werden ({type(exc).__name__}: {str(exc)[:200]}).", "err")
+        return go("/backup")
+    syslog.record("info", "Sicherung", "Sicherung auf dem Server abgelegt", name, actor=user.username)
+    flash(request, f"Sicherung „{name}“ abgelegt.")
+    return go("/backup")
+
+
+@app.get("/backup/file/{name}")
+def backup_file(name: str, user: m.User = Depends(allow("users:2"))):
+    path = need(backup.path_of(name))
+    syslog.record("info", "Sicherung", "Abgelegte Sicherung heruntergeladen", name, actor=user.username)
+    return FileResponse(path, media_type="application/zip", filename=name, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/backup/file/{name}/delete")
+async def backup_delete(name: str, request: Request, user: m.User = Depends(allow("users:2"))):
+    await read_form(request)
+    os.remove(need(backup.path_of(name)))
+    syslog.record("warnung", "Sicherung", "Abgelegte Sicherung gelöscht", name, actor=user.username)
+    flash(request, f"Sicherung „{name}“ gelöscht.")
+    return go("/backup")
 
 
 @app.get("/settings")

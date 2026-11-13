@@ -78,6 +78,26 @@ die Datenbank wird bei Bedarf automatisch um neue Felder ergänzt.
 | `/opt/divera-gateway` | Programm |
 | `/var/lib/divera-gateway` | Datenbank |
 | `/etc/divera-gateway.env` | Einstellungen und `SECRET_KEY` |
+| `/var/lib/divera-gateway/backups` | Sicherungen (automatisch und per Knopf) |
+
+### Sicherung und Wiederherstellung
+
+Unter **Einstellungen → Sicherung** lässt sich die ganze Datenbank (Einstellungen, Löschgruppen, Quellen, Regeln,
+Benutzer, Protokolle) als ZIP herunterladen oder auf dem Server ablegen. Zusätzlich legt das Gateway alle 24 Stunden
+selbst eine Sicherung ab und behält die neuesten 14 (`BACKUP_HOURS`, `BACKUP_KEEP` in `/etc/divera-gateway.env`;
+`BACKUP_HOURS=0` schaltet die Automatik ab).
+
+Accesskeys und Postfach-Passwörter liegen verschlüsselt in der Datenbank und sind nur mit dem `SECRET_KEY` lesbar.
+Für einen neuen Container braucht es deshalb Sicherung **und** `SECRET_KEY`; beim Herunterladen kann der Schlüssel
+auf Wunsch mit eingepackt werden. Wiederherstellen:
+
+```bash
+pct exec <CTID> -- systemctl stop divera-gateway
+pct exec <CTID> -- python3 -m zipfile -e /root/sicherung.zip /root/sicherung
+pct exec <CTID> -- bash -c 'rm -f /var/lib/divera-gateway/gateway.db-wal /var/lib/divera-gateway/gateway.db-shm'
+pct exec <CTID> -- install -o divera-gw -g divera-gw -m 600 /root/sicherung/gateway.db /var/lib/divera-gateway/gateway.db
+pct exec <CTID> -- systemctl start divera-gateway
+```
 | `/root/divera-gateway-zugang.txt` | Startpasswort (nach der ersten Anmeldung löschen) |
 | `journalctl -u divera-gateway` | Dienstprotokoll |
 

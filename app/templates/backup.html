@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Sicherung</h1>
+<div class="card">
+  <h2>Was gesichert wird</h2>
+  <p>Die ganze Datenbank des Gateways: Einstellungen, Löschgruppen mit Accesskeys, Quellen mit Zugangsdaten, Regeln, Benutzer und Protokolle. Accesskeys und Passwörter liegen darin verschlüsselt und sind nur mit dem <code>SECRET_KEY</code> aus <code>/etc/divera-gateway.env</code> lesbar.</p>
+  <p class="hint">Für eine Wiederherstellung auf einem neuen Container brauchst du also beides: eine Sicherung und den SECRET_KEY. Auf demselben Container genügt die Sicherung. Die Anleitung liegt jeder Sicherung als LIESMICH.txt bei.</p>
+</div>
+
+<div class="card">
+  <h2>Herunterladen</h2>
+  <form method="post" action="/backup/download">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="check"><input type="checkbox" name="with_key"> SECRET_KEY mit einpacken</label>
+    <p class="hint">Ohne Haken: Die Datei ist ohne den SECRET_KEY des Containers wertlos für Fremde, du musst den Schlüssel aber getrennt aufbewahren. Mit Haken: Die Datei genügt allein für eine vollständige Wiederherstellung, wer sie hat, kann aber alle Accesskeys und Postfach-Zugangsdaten lesen. Dann nur verschlüsselt oder an einem sicheren Ort ablegen.</p>
+    <div class="actions"><button>Sicherung jetzt herunterladen</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="row"><h2>Auf dem Server</h2>
+    <form method="post" action="/backup/store"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Jetzt auf dem Server sichern</button></form></div>
+  <p class="hint">Ablage in <code>{{ folder }}</code>, immer ohne SECRET_KEY. {% if hours %}Das Gateway legt dort zusätzlich alle {{ hours }} Stunden von selbst eine Sicherung ab.{% else %}Die automatische Sicherung ist abgeschaltet.{% endif %} Es bleiben die neuesten {{ keep }} Dateien, ältere werden gelöscht.</p>
+  <table>
+    <tr><th>Datei</th><th>Erstellt</th><th>Größe</th><th></th></tr>
+    {% for i in items %}
+    <tr><td><a href="/backup/file/{{ i.name }}"><strong>{{ i.name }}</strong></a>{% if i.auto %} <span class="tag">automatisch</span>{% endif %}</td>
+      <td style="white-space:nowrap">{{ i.ts|localtime }}</td><td style="white-space:nowrap">{{ '%.0f'|format(i.size / 1024) }} kB</td>
+      <td style="white-space:nowrap"><a class="btn light" href="/backup/file/{{ i.name }}">Herunterladen</a>
+        <form class="inline" method="post" action="/backup/file/{{ i.name }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form></td></tr>
+    {% else %}<tr><td colspan="4">Noch keine Sicherung abgelegt.</td></tr>{% endfor %}
+  </table>
+  <p class="hint">Diese Dateien liegen im selben Container wie das Gateway. Gegen einen Verlust des Containers schützt nur eine Kopie außerhalb: heruntergeladen oder über die Sicherung des Containers in Proxmox.</p>
+</div>
+<p><a href="/settings">Zurück zu den Einstellungen</a></p>
+{% endblock %}

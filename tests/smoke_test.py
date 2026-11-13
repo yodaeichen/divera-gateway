@@ -784,6 +784,45 @@ with TestClient(app, base_url="http://testserver") as c:
         foreign_batch = db.query(m.ImportBatch).filter_by(tenant_id=2).one().id
     assert e.get(f"/events/batch/{foreign_batch}").status_code == 404 and e.post(f"/events/batch/{foreign_batch}/import", data={"csrf": et}).status_code == 404
 
+    # ---------- Sicherung ----------
+    import io, zipfile, sqlite3
+    from app import backup
+    auto_made = [i["name"] for i in backup.listing()]
+    assert all(n.endswith("-auto.zip") for n in auto_made), "beim Start legt der Hintergrunddienst höchstens eine automatische Sicherung an"
+    for n in auto_made:
+        os.remove(backup.path_of(n))
+    bpage = c.get("/backup").text
+    assert "Noch keine Sicherung abgelegt" in bpage and 'href="/backup"' in c.get("/settings").text
+    dl = c.post("/backup/download", data={"csrf": tok})
+    assert dl.status_code == 200 and dl.headers["content-type"] == "application/zip" and "attachment" in dl.headers["content-disposition"]
+    arch = zipfile.ZipFile(io.BytesIO(dl.content))
+    assert sorted(arch.namelist()) == ["LIESMICH.txt", "gateway.db"] and "NICHT in dieser Sicherung" in arch.read("LIESMICH.txt").decode()
+    snap = os.path.join(os.environ["DATA_DIR"], "probe.db")
+    open(snap, "wb").write(arch.read("gateway.db"))
+    con = sqlite3.connect(snap)
+    assert con.execute("select count(*) from tenants").fetchone()[0] == 2 and con.execute("select count(*) from rules").fetchone()[0] >= 1
+    assert "geheim123" not in str(con.execute("select accesskey_enc from tenants").fetchall()), "Accesskeys bleiben verschlüsselt"
+    con.close(); os.remove(snap)
+    withkey = zipfile.ZipFile(io.BytesIO(c.post("/backup/download", data={"csrf": tok, "with_key": "on"}).content))
+    assert withkey.read("secret.env").decode() == "SECRET_KEY=" + "x" * 40 + "\n" and "mit SECRET_KEY" in c.get("/logs?view=system").text
+    stored = c.post("/backup/store", data={"csrf": tok}).text
+    assert "abgelegt" in stored and len(backup.listing()) == 1
+    bname = backup.listing()[0]["name"]
+    assert bname in stored and c.get(f"/backup/file/{bname}").content[:2] == b"PK"
+    assert c.get("/backup/file/gateway.db").status_code == 404 and c.get("/backup/file/..%2Fgateway.db").status_code == 404
+    assert backup.path_of("../gateway.db") is None and not backup.auto_due()
+    old_keep, backup.KEEP = backup.KEEP, 2
+    for stamp_name in ("divera-gateway-20200101-000000.zip", "divera-gateway-20200102-000000-auto.zip", "fremd.zip"):
+        open(os.path.join(backup.DIR, stamp_name), "wb").write(b"PK")
+    assert backup.store(auto=True).endswith("-auto.zip")
+    left = sorted(os.listdir(backup.DIR))
+    assert len(backup.listing()) == 2 and "fremd.zip" in left and "divera-gateway-20200101-000000.zip" not in left, left
+    backup.KEEP = old_keep
+    assert "gelöscht" in c.post(f"/backup/file/{bname}/delete", data={"csrf": tok}).text and backup.path_of(bname) is None
+    for client, token in ((e, et), (n1, n1t)):
+        assert client.get("/backup").status_code == 403 and client.post("/backup/download", data={"csrf": token}).status_code == 403
+        assert client.post("/backup/store", data={"csrf": token}).status_code == 403, "Sicherung nur für Administratoren"
+
     # ---------- Meldung von Hand senden ----------
     home = c.get("/").text
     assert all(f'href="{path}"' in home for path in ("/alarms", "/news", "/events")) and 'href="/send"' not in home and ">Senden<" not in home

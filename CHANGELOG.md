@@ -2,6 +2,14 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 2.1.0
+
+- Neue Seite „Sicherung" (unter Einstellungen, nur für Administratoren): die ganze Datenbank als ZIP herunterladen,
+  auf Wunsch mit dem `SECRET_KEY`, oder per Knopf auf dem Server ablegen
+- Automatische Sicherung alle 24 Stunden nach `/var/lib/divera-gateway/backups`, die neuesten 14 bleiben erhalten
+  (einstellbar über `BACKUP_HOURS` und `BACKUP_KEEP`)
+- Jede Sicherung enthält eine LIESMICH.txt mit den Schritten zur Wiederherstellung
+
 ## 2.0.0
 
 Start des Echtbetriebs. Die Oberfläche ist nach Aufgaben geordnet:

@@ -10,7 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from . import db as m
-from . import rules, sources, syslog
+from . import backup, rules, sources, syslog
 
 log = logging.getLogger("gateway.worker")
 LOG_DAYS = int(os.environ.get("LOG_DAYS", "30"))
@@ -121,6 +121,11 @@ async def loop():
             if time.time() - last_prune > 3600:
                 last_prune = time.time()
                 await asyncio.to_thread(prune)
+                if await asyncio.to_thread(backup.auto_due):   # tägliche Sicherung ohne Zutun
+                    try:
+                        await asyncio.to_thread(backup.store, True)
+                    except Exception as exc:
+                        await asyncio.to_thread(syslog.record, "fehler", "Sicherung", "Automatische Sicherung fehlgeschlagen", f"{type(exc).__name__}: {exc}")
         except Exception as exc:
             log.exception("Fehler im Hintergrunddienst")
             await asyncio.to_thread(syslog.record, "fehler", "System", "Fehler im Hintergrunddienst", f"{type(exc).__name__}: {exc}")
