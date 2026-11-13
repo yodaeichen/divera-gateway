@@ -14,7 +14,7 @@
     {% endfor %}
   </table>
   <div class="actions">{% if failed or skipped %}<a class="btn" href="/events/batch/{{ batch.id }}">Zurück zur Vorschau und erneut versuchen</a>{% endif %}
-    <a class="btn light" href="/tenants/{{ tenant.id }}/events">Weitere Datei importieren</a><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zur Löschgruppe</a></div>
+    <a class="btn light" href="/tenants/{{ tenant.id }}/events">Weitere Datei importieren</a></div>
 </div>
 {% else %}
 <div class="stats">

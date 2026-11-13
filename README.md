@@ -5,6 +5,16 @@ Mandantenfähig: je Löschgruppe eigene DIVERA-Schlüssel, eigene Quellen und ei
 
 Aktuelle Version und Änderungen: siehe [CHANGELOG.md](CHANGELOG.md). Die laufende Version steht unten auf jeder Seite.
 
+## Aufbau der Oberfläche (ab Version 2.0)
+
+| Menüpunkt | Wofür |
+|---|---|
+| **Alarme** | Alarm von Hand senden, Liste der zuletzt von Hand gesendeten Alarme |
+| **Mitteilungen** | Mitteilung von Hand senden, Liste der zuletzt gesendeten Mitteilungen |
+| **Termine** | Termine aus einer CSV-Datei in DIVERA anlegen |
+| **Löschgruppen** | Der automatische Betrieb: Quellen (Postfächer, Webhooks) und die Regeln, die daraus Meldungen machen |
+| **Protokoll** | Alles, was übergeben wurde, und das Systemprotokoll |
+
 ## Funktionen
 
 - **Quellen:** Microsoft-365-Postfächer (Microsoft Graph, auch Unterordner), IMAP-Postfächer, eingehende Webhooks
@@ -225,7 +235,7 @@ Dabei wird nichts gespeichert und nichts gesendet.
 
 ## Meldung von Hand senden
 
-Über „Senden" in der Kopfzeile oder „Meldung senden" auf der Seite einer Löschgruppe lässt sich einmalig eine
+Über die Menüpunkte „Alarme" und „Mitteilungen" lässt sich einmalig eine
 Mitteilung oder ein Alarm an DIVERA schicken, ohne Regel und ohne eingegangene Nachricht. Art, Stichwort, Text, Adresse
 und Empfänger (RIC, Gruppen, Personen) eintragen; vor dem Senden zeigt eine Bestätigungsseite genau, was übertragen wird.
 Der Testmodus der Löschgruppe gilt hier nicht. Nötig ist das Recht „Von Hand an DIVERA senden".
@@ -251,7 +261,7 @@ Ereignisse sieht nur, wer Benutzer und Rechte verwaltet. Aufbewahrt wird wie bei
 
 ## Termine importieren
 
-Auf der Seite einer Löschgruppe führt „Termine aus CSV importieren" zum Import, etwa für einen Dienstplan aus Excel.
+Der Menüpunkt „Termine" führt zum Import, etwa für einen Dienstplan aus Excel.
 
 1. Vorlage herunterladen oder eine eigene Tabelle als CSV speichern. Pflicht sind die Spalten **Titel** und **Datum**
    (oder **Beginn** mit Datum und Uhrzeit); möglich sind außerdem Ende, Enddatum, Ganztägig, Ort, Beschreibung, Gruppen und ID.

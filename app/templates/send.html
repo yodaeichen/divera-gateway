@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Meldung senden</h1>
+<h1>{{ info.many }}{% if tenant %} <span class="hint">({{ tenant.name }})</span>{% endif %}</h1>
+{% if mode == 'alarm' %}<div class="flash err"><strong>Echter Alarm.</strong> Was du hier sendest, alarmiert die Empfänger mit Alarmton und Rückmeldung. Für reine Informationen nimm <a href="/news{{ '?tenant=' ~ tenant.id if tenant }}">Mitteilungen</a>.</div>{% endif %}
 {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
 {% if sent %}<div class="flash"><strong>{{ 'Alarm' if sent.kind == 'alarm' else 'Mitteilung' }} „{{ sent.title }}" an DIVERA gesendet.</strong> Antwort von DIVERA: {{ sent.detail }}</div>{% endif %}
 
 <div class="card">
-  <form method="get" action="/send" class="row" style="justify-content:flex-start;margin:0">
+  <form method="get" action="{{ info.path }}" class="row" style="justify-content:flex-start;margin:0">
     <label style="margin:0">Löschgruppe</label>
     <select name="tenant" style="width:auto">{% if not tenant %}<option value="">bitte wählen</option>{% endif %}
       {% for t in tenants %}<option value="{{ t.id }}" {{ 'selected' if tenant and tenant.id == t.id }}>{{ t.name }}{{ ' (inaktiv)' if not t.active }}</option>{% endfor %}</select>
@@ -16,12 +17,10 @@
 
 {% if tenant %}
 <form method="post" action="/send">
-<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="tenant_id" value="{{ tenant.id }}">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="tenant_id" value="{{ tenant.id }}"><input type="hidden" name="kind" value="{{ mode }}">
 <div class="card">
-  <h2>Meldung an {{ tenant.name }}</h2>
-  <p class="hint">Sendet einmalig eine Meldung an DIVERA, ohne dass eine Regel oder eine eingegangene Nachricht nötig ist. Vor dem Senden erscheint eine Seite zur Bestätigung.</p>
-  <label>Art</label><select name="kind" style="max-width:320px"><option value="news" {{ 'selected' if v.get('kind') != 'alarm' }}>Mitteilung</option><option value="alarm" {{ 'selected' if v.get('kind') == 'alarm' }}>Alarm</option></select>
-  <p class="hint">Mitteilung: reine Information. Alarm: Einsatz mit Alarmton und Rückmeldung.</p>
+  <h2>{{ 'Neuer Alarm' if mode == 'alarm' else 'Neue Mitteilung' }} an {{ tenant.name }}</h2>
+  <p class="hint">Sendet einmalig {{ 'einen Alarm' if mode == 'alarm' else 'eine Mitteilung' }} an DIVERA, ohne dass eine Regel oder eine eingegangene Nachricht nötig ist. Vor dem Senden erscheint eine Seite zur Bestätigung.</p>
   <label>Stichwort</label><input type="text" name="title" value="{{ v.get('title', '') }}" maxlength="50" required>
   <p class="hint">Überschrift der Meldung, höchstens 50 Zeichen.</p>
   <label>Text</label><textarea name="text" maxlength="1000" style="font-family:inherit;font-size:inherit;min-height:120px">{{ v.get('text', '') }}</textarea>
@@ -50,9 +49,23 @@
   {% else %}<p class="hint">Noch keine Liste vorhanden. Bei der Löschgruppe „Empfänger aus DIVERA laden".</p>{% endif %}
   {% endfor %}
   <p class="hint">Ohne Angabe eines Empfängers entscheidet DIVERA nach den Einstellungen der Einheit, wer die Meldung bekommt. Die Bestätigungsseite zeigt, was übertragen wird.</p>
-  <label class="check"><input type="checkbox" name="priority" {{ 'checked' if v.get('priority') }}> Sonderrechte / Priorität (nur bei Alarm)</label>
-  <div class="actions"><button>Weiter zur Bestätigung</button><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zur Löschgruppe</a></div>
+  {% if mode == 'alarm' %}<label class="check"><input type="checkbox" name="priority" {{ 'checked' if v.get('priority') }}> Sonderrechte / Priorität</label>{% endif %}
+  <div class="actions"><button>Weiter zur Bestätigung</button></div>
 </div>
 </form>
+{% endif %}
+
+{% if tenants %}
+<div class="card">
+  <h2>Zuletzt von Hand gesendete {{ info.many }}</h2>
+  <table>
+    <tr><th>Zeit</th>{% if not tenant %}<th>Löschgruppe</th>{% endif %}<th>Stichwort</th><th>Von</th><th>Ergebnis</th></tr>
+    {% for l in recent %}
+    <tr><td style="white-space:nowrap">{{ l.ts|localtime }}</td>{% if not tenant %}<td>{{ l.tenant_name }}</td>{% endif %}<td><strong>{{ l.subject }}</strong></td><td>{{ l.sender }}</td>
+      <td><span class="tag {{ l.status }}">{{ l.status }}</span></td></tr>
+    {% else %}<tr><td colspan="5">Noch {{ 'kein Alarm' if mode == 'alarm' else 'keine Mitteilung' }} von Hand gesendet.</td></tr>{% endfor %}
+  </table>
+  <p class="hint">{{ info.many }}, die automatisch über Regeln aus Postfächern und Webhooks entstehen, stehen im {% if perm.logs %}<a href="/logs{{ '?tenant=' ~ tenant.id if tenant }}">Protokoll</a>{% else %}Protokoll{% endif %}. Die Regeln dazu liegen bei der Löschgruppe.</p>
+</div>
 {% endif %}
 {% endblock %}

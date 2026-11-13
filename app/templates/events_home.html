@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Termine</h1>
+<div class="card">
+  {% if tenants %}
+  <p>Für welche Löschgruppe sollen Termine angelegt werden?</p>
+  <form method="get" action="/events" class="row" style="justify-content:flex-start;margin:0">
+    <label style="margin:0">Löschgruppe</label>
+    <select name="tenant" style="width:auto">{% for t in tenants %}<option value="{{ t.id }}">{{ t.name }}{{ ' (inaktiv)' if not t.active }}</option>{% endfor %}</select>
+    <button class="light">Auswählen</button>
+  </form>
+  {% else %}<p class="hint">Dir ist noch keine Löschgruppe freigegeben.</p>{% endif %}
+</div>
+{% endblock %}

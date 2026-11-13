@@ -2,6 +2,17 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 2.0.0
+
+Start des Echtbetriebs. Die Oberfläche ist nach Aufgaben geordnet:
+
+- Neue Menüpunkte **Alarme**, **Mitteilungen** und **Termine**: von Hand senden und Termine anlegen, jeweils mit
+  eigener Seite; „Alarme" und „Mitteilungen" zeigen die zuletzt von Hand gesendeten Meldungen
+- Die Seite der **Löschgruppe** enthält nur noch den automatischen Betrieb: Quellen und automatische Regeln
+- Der frühere Menüpunkt „Senden" entfällt; die alte Adresse `/send` führt zu „Mitteilungen"
+- Die Art (Alarm oder Mitteilung) ergibt sich aus dem Menüpunkt und muss nicht mehr gewählt werden;
+  „Sonderrechte / Priorität" gibt es nur noch bei Alarmen
+
 ## 1.34.0
 
 - Bleibt das Stichwort einer Regel leer (z. B. weil ein Platzhalter keinen Wert bekommt), wird der bereinigte Betreff

@@ -448,18 +448,53 @@ def manual_rule(form, tenant: m.Tenant) -> m.Rule:
                   address_tpl=text(form, "address", 300), extra_params="", extract_regex="", match_from="", match_subject="", match_body="")
 
 
-def send_page(request, user, db, tenant, **extra):
+SEND_MODES = {"alarm": {"path": "/alarms", "one": "Alarm", "many": "Alarme"}, "news": {"path": "/news", "one": "Mitteilung", "many": "Mitteilungen"}}
+
+
+def send_page(request, user, db, tenant, mode: str = "news", **extra):
+    """Seite „Alarme“ oder „Mitteilungen“: Formular zum Senden und die zuletzt von Hand gesendeten Meldungen dieser Art."""
     tenants = visible_tenants(db, user)
     directory = directory_of(tenant) if tenant else {"persons": [], "groups": []}
     extra.setdefault("v", {})
-    return page(request, "send.html", user, tenants=tenants, tenant=tenant, directory=directory, channel_list=rules.CHANNELS, **extra)
+    info = SEND_MODES[mode]
+    recent = []
+    if tenants:
+        scope = [tenant.id] if tenant else [t.id for t in tenants]
+        recent = db.scalars(select(m.Log).where(m.Log.source_name == "Meldung von Hand", m.Log.tenant_id.in_(scope),
+                                                m.Log.detail.like(info["one"] + " |%")).order_by(m.Log.id.desc()).limit(10)).all()
+    return page(request, "send.html", user, tenants=tenants, tenant=tenant, directory=directory, channel_list=rules.CHANNELS,
+                mode=mode, info=info, recent=recent, **extra)
+
+
+def pick_tenant(db: Session, user: m.User, tenant: int | None) -> m.Tenant | None:
+    """Die gewählte Löschgruppe; ist nur eine freigegeben, gilt sie ohne Auswahl."""
+    tenants = visible_tenants(db, user)
+    return tenant_for(db, user, tenant) if tenant else (tenants[0] if len(tenants) == 1 else None)
+
+
+@app.get("/alarms")
+def alarms_view(request: Request, tenant: int | None = None, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
+    return send_page(request, user, db, pick_tenant(db, user, tenant), mode="alarm")
+
+
+@app.get("/news")
+def news_view(request: Request, tenant: int | None = None, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
+    return send_page(request, user, db, pick_tenant(db, user, tenant), mode="news")
 
 
 @app.get("/send")
-def send_view(request: Request, tenant: int | None = None, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
-    tenants = visible_tenants(db, user)
-    chosen = tenant_for(db, user, tenant) if tenant else (tenants[0] if len(tenants) == 1 else None)
-    return send_page(request, user, db, chosen)
+def send_view(tenant: int | None = None, user: m.User = Depends(allow("send"))):
+    """Frühere Adresse der Sendeseite."""
+    return go("/news" + (f"?tenant={tenant}" if tenant else ""))
+
+
+@app.get("/events")
+def events_home(request: Request, tenant: int | None = None, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
+    """Menüpunkt „Termine“: führt zur Löschgruppe oder lässt sie wählen, wenn mehrere freigegeben sind."""
+    chosen = pick_tenant(db, user, tenant)
+    if chosen:
+        return go(f"/tenants/{chosen.id}/events")
+    return page(request, "events_home.html", user, tenants=visible_tenants(db, user))
 
 
 @app.post("/send")
@@ -481,8 +516,9 @@ async def send_now(request: Request, db: Session = Depends(get_db), user: m.User
         error = "Bitte ein Stichwort eintragen."
     elif not tenant.accesskey_enc:
         error = "Für diese Löschgruppe ist kein DIVERA-Accesskey hinterlegt."
+    mode = rule.kind
     if error or "edit" in form:
-        return send_page(request, user, db, tenant, v=values, error=error)
+        return send_page(request, user, db, tenant, mode=mode, v=values, error=error)
     data = rules.manual(rule, channels)
     directory = directory_of(tenant)
     def names(kind: str, ids: str) -> list[str]:
@@ -499,8 +535,8 @@ async def send_now(request: Request, db: Session = Depends(get_db), user: m.User
                  detail=f"{'Alarm' if rule.kind == 'alarm' else 'Mitteilung'} | {detail} | ausgelöst von {user.username}"[:2000]))
     db.commit()
     if ok:
-        return send_page(request, user, db, tenant, sent={"kind": rule.kind, "title": rules.title_of(data["payload"]), "detail": detail})
-    return send_page(request, user, db, tenant, v=values, error=f"Senden fehlgeschlagen. Antwort von DIVERA: {detail}")
+        return send_page(request, user, db, tenant, mode=mode, sent={"kind": rule.kind, "title": rules.title_of(data["payload"]), "detail": detail})
+    return send_page(request, user, db, tenant, mode=mode, v=values, error=f"Senden fehlgeschlagen. Antwort von DIVERA: {detail}")
 
 
 # ---------- Termine aus CSV importieren ----------
@@ -525,7 +561,7 @@ def events_view(tid: int, request: Request, db: Session = Depends(get_db), user:
     tenant = tenant_for(db, user, tid)
     recent = db.scalars(select(m.ImportedEvent).where(m.ImportedEvent.tenant_id == tid).order_by(m.ImportedEvent.id.desc()).limit(15)).all()
     total = db.scalar(select(func.count(m.ImportedEvent.id)).where(m.ImportedEvent.tenant_id == tid))
-    return page(request, "events.html", user, tenant=tenant, recent=recent, total=total, labels=events.LABELS, columns=events.COLUMNS,
+    return page(request, "events.html", user, tenant=tenant, tenants=visible_tenants(db, user), recent=recent, total=total, labels=events.LABELS, columns=events.COLUMNS,
                 max_rows=events.MAX_ROWS, hours=events.DEFAULT_HOURS)
 
 

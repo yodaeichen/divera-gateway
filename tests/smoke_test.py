@@ -777,7 +777,7 @@ with TestClient(app, base_url="http://testserver") as c:
     assert len(posted) == 1 and "2 nicht mehr versucht" in stop.text and "trotzdem abgelehnt" in stop.text
     events.send_event = real_event_send
     # Rechte: ohne Senderecht kein Import, fremde Löschgruppe unsichtbar
-    assert n1.get("/tenants/1/events").status_code == 403 and "Termine aus CSV importieren" not in n1.get("/tenants/1").text
+    assert n1.get("/tenants/1/events").status_code == 403 and 'href="/events?tenant=1"' not in n1.get("/tenants/1").text
     assert e.get("/tenants/1/events").status_code == 200 and e.get("/tenants/2/events").status_code == 404
     c.post("/tenants/2/events/upload", data={"csrf": tok}, files={"file": ("fremd.csv", "Titel;Datum\nFremd;01.06.2027\n".encode())})
     with m.SessionLocal() as db:
@@ -785,11 +785,23 @@ with TestClient(app, base_url="http://testserver") as c:
     assert e.get(f"/events/batch/{foreign_batch}").status_code == 404 and e.post(f"/events/batch/{foreign_batch}/import", data={"csrf": et}).status_code == 404
 
     # ---------- Meldung von Hand senden ----------
-    assert "bitte wählen" in c.get("/send").text and 'href="/send"' in c.get("/").text
-    sendform = c.get("/send?tenant=1").text
-    assert "Meldung an FF Musterstadt" in sendform and "Muster, Max" in sendform and '<option value="news" selected>' in sendform
-    assert "Meldung an FF Musterstadt" in e.get("/send").text, "bei nur einer Löschgruppe ist sie vorausgewählt"
-    assert n1.get("/send").status_code == 403 and e.get("/send?tenant=2").status_code == 404 and ">Senden<" not in n1.get("/").text
+    home = c.get("/").text
+    assert all(f'href="{path}"' in home for path in ("/alarms", "/news", "/events")) and 'href="/send"' not in home and ">Senden<" not in home
+    assert "bitte wählen" in c.get("/news").text and "<h1>Mitteilungen" in c.get("/send").text, "die alte Adresse führt zu Mitteilungen"
+    newsform = c.get("/news?tenant=1").text
+    assert "Neue Mitteilung an FF Musterstadt" in newsform and "Muster, Max" in newsform and 'name="kind" value="news"' in newsform
+    assert 'name="priority"' not in newsform and "Echter Alarm" not in newsform and "Zuletzt von Hand gesendete Mitteilungen" in newsform
+    alarmform = c.get("/alarms?tenant=1").text
+    assert "Neuer Alarm an FF Musterstadt" in alarmform and 'name="kind" value="alarm"' in alarmform and 'name="priority"' in alarmform
+    assert "Echter Alarm" in alarmform and "Noch kein Alarm von Hand gesendet" in alarmform and 'action="/alarms"' in alarmform
+    assert "Neue Mitteilung an FF Musterstadt" in e.get("/news").text, "bei nur einer Löschgruppe ist sie vorausgewählt"
+    assert "Termine <span" in e.get("/events").text and "Für welche Löschgruppe" in c.get("/events").text and "Termine <span" in c.get("/events?tenant=1").text
+    for path in ("/alarms", "/news", "/events", "/send"):
+        assert n1.get(path).status_code == 403, path
+    assert e.get("/news?tenant=2").status_code == 404 and e.get("/alarms?tenant=2").status_code == 404 and e.get("/events?tenant=2").status_code == 404
+    assert ">Alarme<" not in n1.get("/").text and ">Termine<" not in n1.get("/").text
+    lg = c.get("/tenants/1").text
+    assert "Automatische Regeln" in lg and "Meldung senden" not in lg and "Termine aus CSV importieren" not in lg and 'href="/alarms?tenant=1"' in lg
     MAN = {"csrf": tok, "tenant_id": "1", "kind": "alarm", "notify": "default", "title": "Probe {subject}", "text": "Zeile 1\r\nZeile {x}", "address": "Gerätehaus",
            "ric": "LZ1", "priority": "on"}
     assert "Bitte ein Stichwort eintragen" in c.post("/send", data=dict(MAN, title="")).text
@@ -800,7 +812,7 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "Wirklich an DIVERA senden?" in ask and "Achtung, echter Alarm" in ask and "Probe {subject}" in ask and 'formaction="/send"' in ask and not hand
     assert "Meldung von Hand" in ask and "Regel wird dabei nicht gespeichert" not in ask
     back = c.post("/send", data=dict(MAN, edit="1")).text
-    assert 'value="Probe {subject}"' in back and '<option value="alarm" selected>' in back and "Zeile {x}" in back and not hand
+    assert 'value="Probe {subject}"' in back and 'name="kind" value="alarm"' in back and "<h1>Alarme" in back and "Zeile {x}" in back and not hand
     done = c.post("/send", data=dict(MAN, confirm="ja")).text
     assert "Alarm „Probe {subject}" in done and "an DIVERA gesendet" in done and len(hand) == 1
     assert hand[0] == ("geheim123", {"title": "Probe {subject}", "text": "Zeile 1\nZeile {x}", "address": "Gerätehaus", "ric": "LZ1", "priority": "1"}), hand[0]
@@ -808,7 +820,9 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "Mitteilung „Info" in quiet and hand[1][0] == "persoenlich456" and hand[1][1]["News"]["user_cluster_relation"] == [501]
     assert [hand[1][1]["News"][f"send_{n}"] for n in ("push", "sms", "call", "mail", "pager")] == [False] * 5, "nichts angekreuzt = still"
     # Benachrichtigungswege einzeln wählen, für Mitteilung und Alarm
-    assert 'name="channel" value="pager"' in sendform and 'name="notify" value="custom"' in sendform
+    assert 'name="channel" value="pager"' in newsform and 'name="notify" value="custom"' in newsform
+    assert "Probe {subject}" in c.get("/alarms?tenant=1").text.split("Zuletzt von Hand gesendete Alarme")[1], "gesendeter Alarm steht in der Liste"
+    assert "Probe {subject}" not in c.get("/news?tenant=1").text and "<strong>Info</strong>" in c.get("/news").text
     CUSTOM = dict(MAN, notify="custom", channel=["push", "sms", "pager", "boese"], grp=["12"], ric="LZ1")
     askc = c.post("/send", data=CUSTOM).text
     assert "Push-Nachricht in der App, SMS, Pager" in askc and "nur die angekreuzten Gruppen" in askc and "RIC wird bei diesem Übertragungsweg nicht übertragen" in askc
@@ -1085,7 +1099,7 @@ with TestClient(app, base_url="http://testserver") as c:
     # Rechte wirken sofort, auch in laufenden Sitzungen
     c.post("/users/save", data=dict(VIEW, id=str(leser_id), p_rules="0", tenant=["2"]))
     assert v.get("/tenants/1").status_code == 404 and v.get(f"/rules/{other_rule}/edit").status_code == 403
-    assert "Regeln" not in v.get("/tenants/2").text.split("<main>")[1].replace("Regeln werden", "")
+    assert "Automatische Regeln" not in v.get("/tenants/2").text and "Regel anlegen" not in v.get("/tenants/2").text
     c.post(f"/users/{leser_id}/delete", data={"csrf": tok})
     assert v.get("/", follow_redirects=False).status_code == 303, "gelöschter Benutzer ist abgemeldet"
 
