@@ -231,7 +231,7 @@ def build_v2(rule: m.Rule, values: dict, channels: list[str]) -> dict:
     """Mitteilung (api/v2/news) oder Alarm (api/v2/alarms) mit ausdrücklich gewählten Benachrichtigungswegen."""
     ntype, _, _ = audience_v2(rule)
     body: dict = {
-        "title": render(rule.title_tpl, values)[:LIMITS["title"]], "text": render(rule.text_tpl, values)[:LIMITS["text"]],
+        "title": title_for(rule, values), "text": render(rule.text_tpl, values)[:LIMITS["text"]],
         "notification_type": ntype, **{f"send_{name}": name in channels for name, _ in CHANNELS},
     }
     address = render(rule.address_tpl, values)[:LIMITS["address"]]
@@ -249,10 +249,17 @@ def build_v2(rule: m.Rule, values: dict, channels: list[str]) -> dict:
     return {"Alarm" if rule.kind == "alarm" else "News": body, "instructions": instructions}
 
 
+def title_for(rule: m.Rule, values: dict) -> str:
+    """Das Stichwort der Meldung. Bleibt es leer (Platzhalter ohne Wert), tritt der bereinigte Betreff an seine Stelle:
+    DIVERA nimmt eine Meldung ohne Stichwort zwar an, zeigt sie aber nicht an."""
+    title = render(rule.title_tpl, values) or values.get("subject", "") or ("Alarm" if rule.kind == "alarm" else "Mitteilung")
+    return title[:LIMITS["title"]]
+
+
 def build_news_v2(rule: m.Rule, values: dict, route: dict) -> dict:
     """Mitteilung für POST api/v2/news (JSON), Aufbau nach der DIVERA-Dokumentation."""
     news: dict = {
-        "title": render(rule.title_tpl, values)[:LIMITS["title"]],
+        "title": title_for(rule, values),
         "text": render(rule.text_tpl, values)[:LIMITS["text"]],
         "notification_type": route["ntype"],
         "send_push": route["push"],
@@ -277,7 +284,7 @@ def build_payload(rule: m.Rule, values: dict) -> dict:
     if route["route"] == "v2":
         return build_news_v2(rule, values, route)
     payload = {
-        "title": render(rule.title_tpl, values)[:LIMITS["title"]],
+        "title": title_for(rule, values),
         "text": render(rule.text_tpl, values)[:LIMITS["text"]],
     }
     address = render(rule.address_tpl, values)[:LIMITS["address"]]

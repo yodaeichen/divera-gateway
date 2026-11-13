@@ -2,6 +2,11 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.34.0
+
+- Bleibt das Stichwort einer Regel leer (z. B. weil ein Platzhalter keinen Wert bekommt), wird der bereinigte Betreff
+  als Stichwort übergeben; ohne Stichwort nimmt DIVERA die Meldung an, zeigt sie aber nicht
+
 ## 1.33.0
 
 - Neue Seite „Nachsenden" je Postfach-Quelle (ersetzt den Knopf „Zurücksetzen"): zeigt die letzten 25 Nachrichten,

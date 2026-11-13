@@ -148,6 +148,12 @@ with TestClient(app, base_url="http://testserver") as c:
                             title_tpl="{subject}", text_tpl="{subject_raw}", address_tpl="")
         seen_sub = rules.preview(plain_rule, {"from": "a@b.de", "subject": "WG: [extern] Vollsperrung Hauptstr.", "body": "x"})
         assert seen_sub["match"] and seen_sub["payload"]["title"] == "Vollsperrung Hauptstr." and seen_sub["payload"]["text"] == "WG: [extern] Vollsperrung Hauptstr."
+    with m.SessionLocal() as db:   # leeres Stichwort: der bereinigte Betreff springt ein
+        blank = m.Rule(tenant_id=1, active=True, kind="news", push=True, ric="", ucr_ids="", group_ids="", priority=False, extra_params="",
+                       match_from="", match_subject="", match_body="", extract_regex="", require_regex=False,
+                       title_tpl="{massnahme} {strasse}", text_tpl="x", address_tpl="")
+        assert rules.preview(blank, {"from": "a", "subject": "WG: Sperrung Hauptstr.", "body": "x"})["payload"]["title"] == "Sperrung Hauptstr."
+        assert rules.preview(blank, {"from": "a", "subject": "", "body": "x"})["payload"]["title"] == "Mitteilung"
     # Betreff nach dem Muster „Art (Teil, Teil, …)“: Regel muss für alle Nachrichten dieser Art gelten
     from app import suggest as sg
     S1 = "WG: verkehrsrechtliche Anordnung (Musterstadt, Eichen, In der Aue, Vollsperrung (Glasfaserausbau), Fa. Beispiel GmbH, 19.11.-18.12.2026)"
