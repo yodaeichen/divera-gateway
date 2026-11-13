@@ -101,6 +101,10 @@
     <p>In der Regel „ohne Push" wählen und Gruppen oder Personen ankreuzen. Zusätzlich muss bei der Löschgruppe ein persönlicher Accesskey hinterlegt sein: der API-Schlüssel eines System-Benutzers in DIVERA, der Mitteilungen erstellen darf. Eine RIC wird auf diesem Weg nicht übertragen.</p></details>
   <details><summary>Kann ich mehrere Suchbegriffe angeben?</summary>
     <p>Ja, in den Bedingungen mit Semikolon getrennt, z. B. <code>Alarm; Einsatz; Brand</code>. Es genügt, wenn einer vorkommt. Bei Empfängern trennt dagegen das Komma, z. B. <code>LZ1,LZ2</code>.</p></details>
+  <details><summary>Meine Regel greift nur bei einer Nachricht, nicht bei den anderen.</summary>
+    <p>Dann sind die Bedingungen zu eng, meist beim Betreff. Auf der Regelseite „Gegen die letzten Nachrichten prüfen" klicken: Die Tabelle zeigt für die letzten zehn Eingänge, wo die Regel greift und welche Bedingung sonst nicht passt. Den Betreff-Begriff auf ein Wort kürzen, das in allen gewünschten Nachrichten vorkommt, oder das Feld leeren, damit allein der Absender zählt.</p></details>
+  <details><summary>Im Stichwort steht „WG:" oder „[extern]" aus der weitergeleiteten Mail.</summary>
+    <p>Der Platzhalter <code>{subject}</code> entfernt solche Vorsätze selbst. Steht im Stichwort trotzdem einer, wird dort vermutlich <code>{subject_raw}</code> verwendet oder der Text fest eingetragen. Die Bedingung „Betreff enthält" prüft weiterhin den unveränderten Betreff.</p></details>
   <details><summary>Die Regel greift in der Live-Ansicht nicht. Woran sehe ich, warum?</summary>
     <p>Unter „Bedingungen" hat jede Bedingung einen Haken oder ein Kreuz. Ein Kreuz zeigt, welches Textstück in der Beispielnachricht fehlt. Ist „Regel greift nur, wenn jeder Ausdruck etwas findet" angekreuzt, zählt auch ein Ausdruck ohne Treffer.</p></details>
   <details><summary>Was ist der Unterschied zwischen Testmodus und „Testweise an DIVERA senden"?</summary>

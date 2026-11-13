@@ -124,13 +124,70 @@ with TestClient(app, base_url="http://testserver") as c:
     mail = ("Einsatznummer: 2026-004711\r\nEinsatzstichwort: B3 - Brand Gebäude\r\nStraße / Nr.: Hauptstr. 12\r\n"
             "Ort: 63679 Eichen\r\nBemerkung: Rauch aus Dachstuhl\r\nhttp://karte.example/1\r\n")
     sources.FETCHERS["m365"] = lambda cfg, ref: {"from": "leitstelle@kreis.example", "subject": "Alarmierung FF Eichen 10.11.2026 16:02", "body": mail}
+    sug = c.post("/sources/1/suggest", data={"csrf": tok, "ref": "AAMk=1"}).text      # keine Vergleichsnachricht verfügbar
+    assert 'name="match_subject" value=""' in sug and "nur diese eine Nachricht" in sug, "aus einer einzelnen Mail wird keine Betreff-Bedingung geraten"
+    sources.TESTERS["m365"] = lambda cfg: {"message": "ok", "items": [
+        {"ts": None, "from": "Leitstelle@kreis.example", "subject": "Alarmierung FF Eichen 10.11.2026 16:02", "preview": "", "ref": "1"},
+        {"ts": None, "from": "leitstelle@kreis.example", "subject": "WG: Alarmierung FF Eichen 09.11.2026 03:12", "preview": "", "ref": "2"},
+        {"ts": None, "from": "leitstelle@kreis.example", "subject": "AW: [extern] Alarmierung FF Eichen Probealarm", "preview": "", "ref": "3"},
+        {"ts": None, "from": "newsletter@anders.example", "subject": "Ganz anderes Thema", "preview": "", "ref": "4"}]}
     sug = c.post("/sources/1/suggest", data={"csrf": tok, "ref": "AAMk=1"}).text
     assert "Vorschlag aus der Beispielnachricht" in sug and "Die Regel greift" in sug and '<option value="news" selected>' in sug
+    assert "den 3 aktuelle Nachrichten dieses Absenders gemeinsam haben" in sug
     assert 'value="Alarmierung FF Eichen"' in sug and 'value="leitstelle@kreis.example"' in sug
     assert 'value="{einsatzstichwort}"' in sug and 'value="{strasse_nr}, {ort}"' in sug and "{bemerkung}" in sug
     assert "B3 - Brand Gebäude" in sug and "Hauptstr. 12, 63679 Eichen" in sug and "karte.example" not in sug.split("<form")[0]
     with m.SessionLocal() as db:
         assert db.query(m.Rule).count() == 1, "Vorschlag darf nicht automatisch gespeichert werden"
+    # Betreff ohne Vorsätze; Bedingungen prüfen weiter den unveränderten Betreff
+    assert rules.clean_subject("WG: AW: [extern] FW:  Sperrung  Hauptstr. ") == "Sperrung Hauptstr." and rules.clean_subject("[B3] Brand") == "[B3] Brand"
+    assert rules.clean_subject("Fwd: [EXTERNAL] Re: Test [extern] bleibt") == "Test [extern] bleibt" and rules.clean_subject("") == ""
+    with m.SessionLocal() as db:
+        plain_rule = m.Rule(tenant_id=1, active=True, kind="news", push=True, ric="", ucr_ids="", group_ids="", priority=False, extra_params="",
+                            match_from="", match_subject="WG:", match_body="", extract_regex="", require_regex=False,
+                            title_tpl="{subject}", text_tpl="{subject_raw}", address_tpl="")
+        seen_sub = rules.preview(plain_rule, {"from": "a@b.de", "subject": "WG: [extern] Vollsperrung Hauptstr.", "body": "x"})
+        assert seen_sub["match"] and seen_sub["payload"]["title"] == "Vollsperrung Hauptstr." and seen_sub["payload"]["text"] == "WG: [extern] Vollsperrung Hauptstr."
+    # Betreff nach dem Muster „Art (Teil, Teil, …)“: Regel muss für alle Nachrichten dieser Art gelten
+    from app import suggest as sg
+    S1 = "WG: verkehrsrechtliche Anordnung (Musterstadt, Eichen, In der Aue, Vollsperrung (Glasfaserausbau), Fa. Beispiel GmbH, 19.11.-18.12.2026)"
+    S2 = "WG: verkehrsrechtliche Anordnung (Musterstadt, Neudorf, Dachsweg, Vollsperrung (Glasfaserausbau), Fa. Beispiel GmbH, 23.11.-05.12.2026)"
+    S3 = "verkehrsrechtliche Anordnung (Musterstadt, Altdorf, Hagener Str., halbseitige Sperrung, Fa. Muster AG, 01.12.-03.12.2026)"
+    assert sg.split_top_level("a, b (c, d), e") == ["a", "b (c, d)", "e"]
+    shape = sg.structured_subject(S1)
+    assert shape["names"] == ["stadt", "ortsteil", "strasse", "massnahme", "firma", "zeitraum"] and shape["head"] == "verkehrsrechtliche Anordnung"
+    assert sg.structured_subject("Alarmierung FF Eichen 10.11.2026") is None and sg.structured_subject("Hinweis (kurz)") is None
+    fwd_body = "Zur Info!\n\nVon: Amt <amt@stadt.example>\nGesendet: Freitag, 13. November 2026\nAn: Verteiler\nBetreff: verkehrsrechtliche Anordnung\n\nSehr geehrte Damen und Herren,\nanbei die AO."
+    one = sg.suggest({"from": "amt@stadt.example", "subject": S1, "body": fwd_body})["fields"]      # ohne Vergleichsnachricht
+    three = sg.suggest({"from": "amt@stadt.example", "subject": S1, "body": fwd_body}, [S2, S3])
+    assert one["match_subject"] == "verkehrsrechtliche Anordnung" and three["fields"]["match_subject"] == "verkehrsrechtliche Anordnung"
+    assert one["title_tpl"] == "{massnahme} {strasse}" and one["address_tpl"] == "{strasse}, {ortsteil}, {stadt}" and "{zeitraum}" in one["text_tpl"]
+    assert "(?P<von>" not in one["extract_regex"] and "(?P<gesendet>" not in one["extract_regex"], "Kopfzeilen der Weiterleitung sind keine Felder"
+    assert one["name"] == "Vorschlag: verkehrsrechtliche Anordnung" and not any("keine Zeilen der Form" in n for n in three["notes"])
+    with m.SessionLocal() as db:
+        uni = m.Rule(tenant_id=1, active=True, kind="news", push=True, ric="", ucr_ids="", group_ids="", priority=False, extra_params="",
+                     match_body="", require_regex=False, **one)
+        outs = [rules.preview(uni, {"from": "Amt@stadt.example", "subject": sub, "body": fwd_body}) for sub in (S1, S2, S3, "AW: Einladung Sommerfest")]
+        assert [o["match"] for o in outs] == [True, True, True, False], "eine Regel für alle Nachrichten dieser Art"
+        assert [o["payload"]["title"] for o in outs[:3]] == ["Vollsperrung (Glasfaserausbau) In der Aue", "Vollsperrung (Glasfaserausbau) Dachsweg", "halbseitige Sperrung Hagener Str."]
+        assert outs[1]["payload"]["address"] == "Dachsweg, Neudorf, Musterstadt" and outs[2]["payload"]["text"].startswith("Zeitraum: 01.12.-03.12.2026\nFirma: Fa. Muster AG")
+        assert "WG:" not in outs[0]["payload"]["text"] and all(len(o["payload"]["title"]) <= 50 for o in outs[:3])
+    # Regel gegen die letzten Nachrichten der Quelle prüfen
+    stamp_ = dt.datetime(2026, 11, 13, 7, 35)
+    sources.RECENT["m365"] = lambda cfg, count: [{"from": "amt@stadt.example", "subject": sub, "body": fwd_body, "date": "", "ts": stamp_}
+                                                 for sub in (S1, S2, S3, "AW: Einladung Sommerfest")]
+    FORM = {"csrf": tok, "tenant_id": "1", "name": "Anordnungen", "source_id": "1", "kind": "news", "stop": "on", "active": "on", **{k: v for k, v in one.items() if k != "name"}}
+    chk = c.post("/rules/check", data=FORM).text
+    assert "greift bei <strong>3 von 4</strong>" in chk and "halbseitige Sperrung Hagener Str." in chk and "Betreff passt nicht" in chk and "13.11.2026 08:35:00" in chk
+    narrow = c.post("/rules/check", data=dict(FORM, match_subject="In der Aue")).text
+    assert "greift bei <strong>1 von 4</strong>" in narrow and "lockere die Bedingungen" in narrow
+    assert "braucht ein Postfach als Quelle" in c.post("/rules/check", data=dict(FORM, source_id="2")).text
+    sources.RECENT["m365"] = lambda cfg, count: (_ for _ in ()).throw(RuntimeError("Graph-Fehler 502"))
+    assert "konnten nicht geladen werden" in c.post("/rules/check", data=FORM).text
+    with m.SessionLocal() as db:
+        assert db.query(m.Rule).count() == 1, "die Prüfung speichert nichts"
+    assert "Gegen die letzten Nachrichten prüfen" in c.get("/rules/1/edit").text
+
     # Einzelne Nachricht von Hand verarbeiten
     assert "Jetzt verarbeiten" in shown and "Testmodus ist an" in shown
     sources.FETCHERS["m365"] = lambda cfg, ref: {"id": "<mid-77>", "date": "", "from": "ls@x.de", "subject": "Alarm von Hand", "body": body}

@@ -887,6 +887,41 @@ async def rule_test(request: Request, db: Session = Depends(get_db), user: m.Use
     return rule_page(request, user, tenant, rule, sample=sample, result=result, error=error)
 
 
+CHECK_COUNT = 10
+
+
+@app.post("/rules/check")
+async def rule_check(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:1", "sources:1"))):
+    """Prüft die Regel, wie sie gerade im Formular steht, gegen die neuesten Nachrichten der Quelle. Speichert und sendet nichts."""
+    form = await read_form(request)
+    rule = unsaved_rule(form, db, user)
+    error = apply_rule_form(rule, form, db)
+    sample = read_sample(form)
+    tenant = tenant_for(db, user, rule.tenant_id)
+    pollable = [s for s in tenant.sources if s.type in sources.RECENT]
+    source = next((s for s in pollable if s.id == rule.source_id), None) if rule.source_id else (pollable[0] if pollable else None)
+    check = None
+    if not error and source is None:
+        error = "Diese Prüfung braucht ein Postfach als Quelle. Für Webhooks nutze die Beispielnachricht."
+    if not error:
+        try:
+            recent = await asyncio.to_thread(sources.RECENT[source.type], source.config, CHECK_COUNT)
+        except Exception as exc:
+            error = f"Die Nachrichten von „{source.name}“ konnten nicht geladen werden ({type(exc).__name__}: {str(exc)[:200]})."
+        else:
+            rows = []
+            for msg in recent:
+                data = rules.preview(rule, msg)
+                failed = [c["label"] for c in data["conditions"] if not c["ok"]]
+                if data["require_regex"] and any(not e["ok"] for e in data["expressions"]):
+                    failed.append("Ausdruck")
+                rows.append({"ts": msg["ts"], "from": msg["from"], "subject": msg["subject"], "match": data["match"],
+                             "title": data["fields"][0]["value"], "failed": failed})
+            check = {"source": source.name, "rows": rows, "hits": sum(1 for r in rows if r["match"])}
+    return rule_page(request, user, tenant, rule, sample=sample, result=evaluate(rule, sample) if sample and not error else None,
+                     error=error, check=check)
+
+
 @app.post("/rules/preview")
 async def rule_preview(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("rules:1"))):
     """Live-Ansicht: wertet die gerade im Formular stehenden Werte aus. Speichert und sendet nichts."""
@@ -979,7 +1014,18 @@ async def rule_suggest(sid: int, request: Request, db: Session = Depends(get_db)
         except Exception as exc:
             flash(request, f"Nachricht konnte nicht geladen werden ({type(exc).__name__}: {str(exc)[:200]})", "err")
             return go(f"/tenants/{source.tenant_id}")
-    proposal = suggest.suggest(msg)
+    # Vergleich mit weiteren aktuellen Nachrichten desselben Absenders, damit der Vorschlag nicht nur auf diese eine passt
+    others = []
+    if source.type != "webhook":
+        try:
+            listing = await asyncio.to_thread(sources.listing, source.type, source.config, CHECK_COUNT)
+            same = [i["subject"] for i in listing["items"] if i["from"].lower() == msg["from"].lower()]
+            if msg["subject"] in same:
+                same.remove(msg["subject"])  # die Beispielnachricht selbst zählt nicht als Vergleich
+            others = same
+        except Exception:
+            others = []
+    proposal = suggest.suggest(msg, others)
     rule = m.Rule(tenant_id=source.tenant_id, source_id=source.id, active=True, position=10, match_body="",
                   require_regex=False, kind="news", ric="", ucr_ids="", group_ids="", priority=False, push=True, extra_params="", stop=True,
                   **proposal["fields"])

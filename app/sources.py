@@ -231,10 +231,10 @@ def _naive_utc(value: dt.datetime) -> dt.datetime:
     return value.replace(tzinfo=None)
 
 
-def test_m365(cfg: dict) -> dict:
+def test_m365(cfg: dict, count: int = PREVIEW_COUNT) -> dict:
     """Verbindungstest: liefert die neuesten Nachrichten des Ordners zur Kontrolle."""
-    raw = _graph_messages(cfg, {"$top": str(PREVIEW_COUNT), "$orderby": "receivedDateTime desc",
-                                "$select": "id,subject,from,receivedDateTime,bodyPreview"}, limit=PREVIEW_COUNT)
+    raw = _graph_messages(cfg, {"$top": str(count), "$orderby": "receivedDateTime desc",
+                                "$select": "id,subject,from,receivedDateTime,bodyPreview"}, limit=count)
     items = []
     for item in raw:
         received = item.get("receivedDateTime", "")
@@ -379,6 +379,46 @@ def fetch_imap(cfg: dict, ref: str) -> dict:
             pass
 
 
+def recent_m365(cfg: dict, count: int) -> list[dict]:
+    """Die neuesten Nachrichten mit vollem Text, um eine Regel gegen echte Eingänge zu prüfen."""
+    raw = _graph_messages(cfg, {"$top": str(count), "$orderby": "receivedDateTime desc",
+                                "$select": "id,subject,from,receivedDateTime,bodyPreview"}, limit=count)
+    result = []
+    for item in raw:
+        received = item.get("receivedDateTime", "")
+        result.append({"from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""), "subject": item.get("subject") or "",
+                       "body": _graph_body(cfg, item), "date": received,
+                       "ts": _naive_utc(dt.datetime.fromisoformat(received.replace("Z", "+00:00"))) if received else None})
+    return result
+
+
+def recent_imap(cfg: dict, count: int) -> list[dict]:
+    conn = _imap_connect(cfg)
+    result = []
+    try:
+        for uid in reversed(_imap_uids(conn, "ALL")[-count:]):
+            status, data = conn.uid("fetch", str(uid), "(BODY.PEEK[])")
+            if status != "OK" or not data or not isinstance(data[0], tuple):
+                continue
+            sender, subject, body, ts = _parse_mail(data[0][1])
+            result.append({"from": sender, "subject": subject, "body": body, "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": _naive_utc(ts)})
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+    return result
+
+
+def listing(kind: str, cfg: dict, count: int) -> dict:
+    """Die neuesten Nachrichten ohne Text; count wird beachtet, wo die Quelle es unterstützt."""
+    try:
+        return TESTERS[kind](cfg, count)
+    except TypeError:
+        return TESTERS[kind](cfg)
+
+
+RECENT = {"m365": recent_m365, "imap": recent_imap}
 FETCHERS = {"m365": fetch_m365, "imap": fetch_imap}
 POLLERS = {"m365": poll_m365, "imap": poll_imap}
 TESTERS = {"m365": test_m365, "imap": test_imap}

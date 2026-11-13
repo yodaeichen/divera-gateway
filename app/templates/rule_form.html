@@ -16,6 +16,21 @@
   <p class="hint">Der Vorschlag ist noch nicht gespeichert. Passe die Felder an, drücke unten „Prüfen ohne Speichern", bis das Ergebnis stimmt, und speichere dann.</p>
 </div>
 {% endif %}
+{% if check %}
+<div class="card">
+  <h2>Prüfung gegen die letzten {{ check.rows|length }} Nachrichten von „{{ check.source }}"</h2>
+  <div class="flash {{ '' if check.hits else 'err' }}">Die Regel greift bei <strong>{{ check.hits }} von {{ check.rows|length }}</strong> Nachrichten.{% if check.hits == 1 and check.rows|length > 1 %} Soll sie mehr erfassen, lockere die Bedingungen: zum Beispiel den Betreff-Begriff kürzen oder leeren.{% endif %}</div>
+  <table>
+    <tr><th>Eingang</th><th>Absender</th><th>Betreff</th><th>Regel</th><th>Stichwort an DIVERA</th></tr>
+    {% for r in check.rows %}
+    <tr><td style="white-space:nowrap">{{ r.ts|localtime if r.ts else '' }}</td><td>{{ r.from }}</td><td>{{ r.subject }}</td>
+      <td>{% if r.match %}<span class="tag gesendet">greift</span>{% else %}<span class="tag">greift nicht</span><br><span class="hint">{{ r.failed|join(', ') }} passt nicht</span>{% endif %}</td>
+      <td>{% if r.match %}<strong>{{ r.title }}</strong>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="5">Der Ordner ist leer.</td></tr>{% endfor %}
+  </table>
+  <p class="hint">Geprüft wird die Regel, wie sie gerade im Formular steht. Es wurde nichts gespeichert und nichts gesendet.</p>
+</div>
+{% endif %}
 {% if result %}
 <div class="card" id="static-result">
   <h2>Ergebnis des Probelaufs</h2>
@@ -45,7 +60,7 @@
     <tr><td><code>{name}</code></td><td>Platzhalter, wird durch den Wert aus der Nachricht ersetzt</td><td><code>{subject}</code>, <code>{stichwort}</code></td></tr>
     <tr><td>Zeilenumbruch</td><td>Trennt Ausdrücke und weitere API-Parameter</td><td>ein Eintrag je Zeile</td></tr>
   </table>
-  <p class="hint">Immer verfügbare Platzhalter: <code>{subject}</code> Betreff, <code>{from}</code> Absender, <code>{body}</code> ganzer Text, <code>{date}</code> Empfangszeit.</p>
+  <p class="hint">Immer verfügbare Platzhalter: <code>{subject}</code> Betreff ohne Vorsätze wie „WG:", „AW:" oder „[extern]", <code>{subject_raw}</code> Betreff unverändert, <code>{from}</code> Absender, <code>{body}</code> ganzer Text, <code>{date}</code> Empfangszeit.</p>
 </details>
 
 <div class="split">
@@ -109,7 +124,7 @@
   {% endfor %}
   <p class="hint">RIC, Gruppen und Personen werden gemeinsam an DIVERA übergeben. Die Live-Ansicht zeigt, was mitgeschickt wird.</p>
   <label>Stichwort</label><input type="text" name="title_tpl" value="{{ rule.title_tpl if rule else '{subject}' }}" placeholder="{stichwort}">
-  <p class="hint">Überschrift des Alarms, höchstens 50 Zeichen. Fester Text und Platzhalter lassen sich mischen, z. B. <code>BMA {objekt}</code>.</p>
+  <p class="hint">Überschrift der Meldung, höchstens 50 Zeichen. Fester Text und Platzhalter lassen sich mischen, z. B. <code>BMA {objekt}</code>. <code>{subject}</code> liefert den Betreff bereits ohne „WG:", „AW:" und „[extern]".</p>
   <label>Text</label><textarea name="text_tpl" placeholder="{body}">{{ rule.text_tpl if rule else '{body}' }}</textarea>
   <p class="hint">Meldungstext, höchstens 1000 Zeichen. <code>{body}</code> übernimmt den ganzen Nachrichtentext.</p>
   <label>Adresse</label><input type="text" name="address_tpl" value="{{ rule.address_tpl if rule else '' }}" placeholder="{strasse}, {ort}">
@@ -135,6 +150,7 @@
   <label>Text</label><textarea name="t_body" style="min-height:160px">{{ sample.body if sample else '' }}</textarea>
   <div class="actions">
     <button class="light" formaction="/rules/test">Prüfen ohne Speichern</button>
+    {% if perm.sources >= 1 %}<button class="light" formaction="/rules/check">Gegen die letzten Nachrichten prüfen</button>{% endif %}
     {% if perm.rules >= 2 %}<button>Speichern</button>{% endif %}
     {% if perm.send %}<button class="light" formaction="/rules/send-test">Testweise an DIVERA senden …</button>{% endif %}
     <a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zur Löschgruppe</a>
@@ -144,5 +160,5 @@
 </form>
 <aside id="live" class="card live"><h2>Live-Ansicht</h2><p class="hint">Wird geladen. Ohne JavaScript bitte „Prüfen ohne Speichern" verwenden.</p></aside>
 </div>
-<script src="/static/rule_live.js?v=13" defer></script>
+<script src="/static/rule_live.js?v=31" defer></script>
 {% endblock %}

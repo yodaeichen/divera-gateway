@@ -182,7 +182,9 @@ Je Zeile ein regulärer Ausdruck, der einen Wert aus Betreff und Text liest. Ben
 
 | Platzhalter | Inhalt |
 |---|---|
-| `{subject}` `{from}` `{body}` `{date}` | Betreff, Absender, ganzer Text, Empfangszeit |
+| `{subject}` | Betreff ohne Vorsätze wie „WG:", „AW:", „Fwd:" und ohne Markierungen wie „[extern]" |
+| `{subject_raw}` | Betreff unverändert |
+| `{from}` `{body}` `{date}` | Absender, ganzer Text, Empfangszeit |
 | `{name}` | benannte Gruppe `(?P<name>...)` aus einem Ausdruck |
 | `{feld}` | bei Webhooks jedes übergebene Feld der obersten Ebene |
 

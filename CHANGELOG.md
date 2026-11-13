@@ -2,6 +2,14 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.31.0
+
+- Regelvorschläge sind allgemeiner: Die Betreff-Bedingung entsteht aus dem Vergleich mit weiteren Nachrichten desselben
+  Absenders statt aus der einen Beispielnachricht; Kopfzeilen weitergeleiteter Mails werden nicht mehr als Felder vorgeschlagen
+- Neue Prüfung „Gegen die letzten Nachrichten prüfen" auf der Regelseite: zeigt, auf welche der letzten zehn Eingänge die Regel greift
+- Der Platzhalter `{subject}` liefert den Betreff ohne „WG:", „AW:", „Fwd:" und ohne Markierungen wie „[extern]";
+  der unveränderte Betreff steht in `{subject_raw}`
+
 ## 1.30.0
 
 - Microsoft 365: Die Nachrichtenliste wird ohne Texte abgefragt, der Text nur für neue Nachrichten einzeln geholt;

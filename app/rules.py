@@ -24,6 +24,19 @@ LIMITS = {"title": 50, "text": 1000, "address": 200}
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
 
+# Vorsätze, die Mailprogramme beim Weiterleiten und Antworten vor den Betreff setzen, und Markierungen von Mailfiltern
+_SUBJECT_PREFIX = re.compile(r"^\s*(?:(?:WG|AW|FW|FWD|RE|TR|WTR|Antwort|Weitergeleitet|Weiterleitung)\s*:|"
+                             r"\[\s*(?:extern|external|ext|extern!|externe?\s+e-?mail|spam|\*+spam\*+)\s*\])\s*", re.I)
+
+
+def clean_subject(subject: str) -> str:
+    """Betreff ohne „WG:“, „AW:“, „Fwd:“ und ohne Markierungen wie „[extern]“ am Anfang, auch mehrfach hintereinander."""
+    text, previous = (subject or "").strip(), None
+    while text != previous:
+        previous, text = text, _SUBJECT_PREFIX.sub("", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def render(template: str, values: dict) -> str:
     """Ersetzt {name} durch den Wert; unbekannte Platzhalter werden leer."""
     return _PLACEHOLDER.sub(lambda mt: str(values.get(mt.group(1), "")), template or "").strip()
@@ -48,7 +61,10 @@ def analyse(rule: m.Rule, msg: dict, strict: bool = False) -> dict:
             hit = next((term for term in terms if term.lower() in (haystack or "").lower()), "")
             conditions.append({"label": label, "needle": needle, "terms": terms, "hit": hit, "ok": bool(hit)})
     values = {k: str(v) for k, v in (msg.get("extra") or {}).items()}
-    values.update({"from": msg["from"], "subject": msg["subject"], "body": msg["body"], "date": msg.get("date", "")})
+    # {subject} ist der bereinigte Betreff (ohne WG:, AW:, [extern]); der unveränderte steht in {subject_raw}.
+    # Die Bedingungen oben prüfen weiter den unveränderten Betreff.
+    values.update({"from": msg["from"], "subject": clean_subject(msg["subject"]), "subject_raw": msg["subject"],
+                   "body": msg["body"], "date": msg.get("date", "")})
     haystack = msg["subject"] + "\n" + msg["body"].replace("\r\n", "\n")
     expressions = []
     for line in (rule.extract_regex or "").splitlines():  # ein Ausdruck je Zeile
