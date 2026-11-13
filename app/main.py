@@ -445,7 +445,7 @@ async def tenant_delete(tid: int, request: Request, db: Session = Depends(get_db
 def manual_rule(form, tenant: m.Tenant) -> m.Rule:
     """Baut aus dem Formular eine Regel nur im Speicher, damit dieselbe Sendelogik wie im Betrieb greift."""
     return m.Rule(tenant_id=tenant.id, name="Meldung von Hand", active=True, kind="alarm" if form.get("kind") == "alarm" else "news",
-                  push=form.get("push") != "0", priority="priority" in form, ric=text(form, "ric", 300),
+                  push=True, priority="priority" in form, ric=text(form, "ric", 300),
                   ucr_ids=",".join(rules.id_list(form.getlist("ucr")))[:1000], group_ids=",".join(rules.id_list(form.getlist("grp")))[:1000],
                   title_tpl=text(form, "title", 200), text_tpl=str(form.get("text", "")).replace("\r\n", "\n").strip()[:4000],
                   address_tpl=text(form, "address", 300), extra_params="", extract_regex="", match_from="", match_subject="", match_body="")
@@ -455,7 +455,7 @@ def send_page(request, user, db, tenant, **extra):
     tenants = visible_tenants(db, user)
     directory = directory_of(tenant) if tenant else {"persons": [], "groups": []}
     extra.setdefault("v", {})
-    return page(request, "send.html", user, tenants=tenants, tenant=tenant, directory=directory, **extra)
+    return page(request, "send.html", user, tenants=tenants, tenant=tenant, directory=directory, channel_list=rules.CHANNELS, **extra)
 
 
 @app.get("/send")
@@ -471,7 +471,10 @@ async def send_now(request: Request, db: Session = Depends(get_db), user: m.User
     form = await read_form(request)
     tenant = tenant_for(db, user, int(form.get("tenant_id") or 0))
     rule = manual_rule(form, tenant)
-    values = {"kind": rule.kind, "push": "1" if rules.wants_push(rule) else "0", "priority": rule.priority, "ric": rule.ric,
+    known = {name for name, _ in rules.CHANNELS}
+    channels = [c for c in form.getlist("channel") if c in known] if form.get("notify") == "custom" else None
+    values = {"kind": rule.kind, "notify": "custom" if channels is not None else "default", "channels": channels or [],
+              "priority": rule.priority, "ric": rule.ric,
               "title": rule.title_tpl, "text": rule.text_tpl, "address": rule.address_tpl,
               "ucr": [int(i) for i in rules.id_list(rule.ucr_ids)], "grp": [int(i) for i in rules.id_list(rule.group_ids)]}
     error = ""
@@ -483,7 +486,7 @@ async def send_now(request: Request, db: Session = Depends(get_db), user: m.User
         error = "Für diese Löschgruppe ist kein DIVERA-Accesskey hinterlegt."
     if error or "edit" in form:
         return send_page(request, user, db, tenant, v=values, error=error)
-    data = rules.manual(rule)
+    data = rules.manual(rule, channels)
     directory = directory_of(tenant)
     def names(kind: str, ids: str) -> list[str]:
         lookup = {str(entry["id"]): entry["name"] for entry in directory[kind]}

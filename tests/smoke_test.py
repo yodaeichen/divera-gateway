@@ -697,7 +697,7 @@ with TestClient(app, base_url="http://testserver") as c:
     assert "Meldung an FF Musterstadt" in sendform and "Muster, Max" in sendform and '<option value="news" selected>' in sendform
     assert "Meldung an FF Musterstadt" in e.get("/send").text, "bei nur einer Löschgruppe ist sie vorausgewählt"
     assert n1.get("/send").status_code == 403 and e.get("/send?tenant=2").status_code == 404 and ">Senden<" not in n1.get("/").text
-    MAN = {"csrf": tok, "tenant_id": "1", "kind": "alarm", "push": "1", "title": "Probe {subject}", "text": "Zeile 1\r\nZeile {x}", "address": "Gerätehaus",
+    MAN = {"csrf": tok, "tenant_id": "1", "kind": "alarm", "notify": "default", "title": "Probe {subject}", "text": "Zeile 1\r\nZeile {x}", "address": "Gerätehaus",
            "ric": "LZ1", "priority": "on"}
     assert "Bitte ein Stichwort eintragen" in c.post("/send", data=dict(MAN, title="")).text
     hand = []
@@ -711,9 +711,32 @@ with TestClient(app, base_url="http://testserver") as c:
     done = c.post("/send", data=dict(MAN, confirm="ja")).text
     assert "Alarm „Probe {subject}" in done and "an DIVERA gesendet" in done and len(hand) == 1
     assert hand[0] == ("geheim123", {"title": "Probe {subject}", "text": "Zeile 1\nZeile {x}", "address": "Gerätehaus", "ric": "LZ1", "priority": "1"}), hand[0]
-    quiet = c.post("/send", data={"csrf": tok, "tenant_id": "1", "kind": "news", "push": "0", "title": "Info", "ucr": ["501"], "confirm": "ja"}).text
+    quiet = c.post("/send", data={"csrf": tok, "tenant_id": "1", "kind": "news", "notify": "custom", "title": "Info", "ucr": ["501"], "confirm": "ja"}).text
     assert "Mitteilung „Info" in quiet and hand[1][0] == "persoenlich456" and hand[1][1]["News"]["user_cluster_relation"] == [501]
-    assert hand[1][1]["News"]["send_push"] is False
+    assert [hand[1][1]["News"][f"send_{n}"] for n in ("push", "sms", "call", "mail", "pager")] == [False] * 5, "nichts angekreuzt = still"
+    # Benachrichtigungswege einzeln wählen, für Mitteilung und Alarm
+    assert 'name="channel" value="pager"' in sendform and 'name="notify" value="custom"' in sendform
+    CUSTOM = dict(MAN, notify="custom", channel=["push", "sms", "pager", "boese"], grp=["12"], ric="LZ1")
+    askc = c.post("/send", data=CUSTOM).text
+    assert "Push-Nachricht in der App, SMS, Pager" in askc and "nur die angekreuzten Gruppen" in askc and "RIC wird bei diesem Übertragungsweg nicht übertragen" in askc
+    backc = c.post("/send", data=dict(CUSTOM, edit="1")).text
+    assert 'name="channel" value="sms" checked' in backc and 'name="channel" value="mail" checked' not in backc and 'name="notify" value="custom" checked' in backc
+    c.post("/send", data=dict(CUSTOM, confirm="ja"))
+    key3, alarm3 = hand[2]
+    assert key3 == "persoenlich456" and set(alarm3) == {"Alarm", "instructions"} and alarm3["instructions"] == {"group": {"mapping": "id"}}
+    assert alarm3["Alarm"] == {"title": "Probe {subject}", "text": "Zeile 1\nZeile {x}", "notification_type": 3, "send_push": True, "send_sms": True,
+                               "send_call": False, "send_mail": False, "send_pager": True, "address": "Gerätehaus", "priority": True, "group": [12]}, alarm3
+    c.post("/send", data=dict(CUSTOM, kind="news", channel=["mail"], grp=[], ric="", confirm="ja"))
+    assert hand[3][1]["News"]["notification_type"] == 2 and hand[3][1]["News"]["send_mail"] is True and "priority" not in hand[3][1]["News"]
+    import httpx as _hx3
+    seen_urls = []
+    class _R3:
+        status_code, text = 201, "{}"
+        def json(self): return {}
+    keep3, rules.httpx.post = rules.httpx.post, lambda url, params=None, data=None, json=None, timeout=None: seen_urls.append((url, json is not None)) or _R3()
+    assert keep_send("k", alarm3)[0] and keep_send("k", hand[3][1])[0] and keep_send("k", {"title": "x"})[0]
+    rules.httpx.post = keep3
+    assert [u[0].rsplit("/", 1)[1] for u in seen_urls] == ["alarms", "news", "alarm"] and [u[1] for u in seen_urls] == [True, True, False]
     rules.send_divera = lambda key, payload: (False, "HTTP 500: kaputt")
     failed_send = c.post("/send", data=dict(MAN, confirm="ja")).text
     assert "Senden fehlgeschlagen" in failed_send and 'value="Probe {subject}"' in failed_send

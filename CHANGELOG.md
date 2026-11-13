@@ -2,6 +2,10 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.26.0
+
+- „Meldung senden": Benachrichtigungswege einzeln wählbar (Push, SMS, Sprachanruf, E-Mail, Pager), für Mitteilungen und Alarme
+
 ## 1.25.0
 
 - „Meldung senden": Mitteilung oder Alarm von Hand an DIVERA schicken, ohne Regel, mit Bestätigungsseite

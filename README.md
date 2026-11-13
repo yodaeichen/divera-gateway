@@ -228,6 +228,10 @@ Mitteilung oder ein Alarm an DIVERA schicken, ohne Regel und ohne eingegangene N
 und Empfänger (RIC, Gruppen, Personen) eintragen; vor dem Senden zeigt eine Bestätigungsseite genau, was übertragen wird.
 Der Testmodus der Löschgruppe gilt hier nicht. Nötig ist das Recht „Von Hand an DIVERA senden".
 
+Bei der Benachrichtigung gibt es zwei Möglichkeiten: „Wie in DIVERA eingestellt" nutzt die ältere Schnittstelle und
+kennt RIC. „Nur über diese Wege" lässt Push, SMS, Sprachanruf, E-Mail und Pager einzeln ankreuzen; das läuft über
+`api/v2/news` bzw. `api/v2/alarms`, braucht den persönlichen Accesskey und überträgt keine RIC.
+
 ## Systemprotokoll
 
 Das Protokoll hat zwei Reiter. „Meldungen an DIVERA" zeigt jede eingegangene Nachricht mit ihrem Ergebnis. Das

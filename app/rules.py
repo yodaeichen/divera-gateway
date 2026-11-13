@@ -13,6 +13,8 @@ from . import security as sec
 
 log = logging.getLogger("gateway.rules")
 DIVERA_API_URL = os.environ.get("DIVERA_API_URL", "https://app.divera247.com/api/alarm")
+DIVERA_ALARMS_URL = os.environ.get("DIVERA_ALARMS_URL", "https://app.divera247.com/api/v2/alarms")
+CHANNELS = [("push", "Push-Nachricht in der App"), ("sms", "SMS"), ("call", "Sprachanruf"), ("mail", "E-Mail"), ("pager", "Pager")]
 DIVERA_NEWS_URL = os.environ.get("DIVERA_NEWS_URL", "https://app.divera247.com/api/v2/news")
 DIVERA_PULL_URL = os.environ.get("DIVERA_PULL_URL", "https://app.divera247.com/api/v2/pull/all")
 # Laut DIVERA-Dokumentation vom Typ "Integer-Array": werden als Liste übertragen, nicht als Text mit Kommas.
@@ -185,8 +187,50 @@ def plan(rule: m.Rule) -> dict:
     return {"route": "v2", "push": push, "ntype": ntype, "audience": audience, "notes": notes}
 
 
+def is_v2(payload: dict) -> bool:
+    return "News" in payload or "Alarm" in payload
+
+
 def title_of(payload: dict) -> str:
-    return str((payload.get("News") or payload).get("title", ""))
+    return str((payload.get("News") or payload.get("Alarm") or payload).get("title", ""))
+
+
+def audience_v2(rule: m.Rule) -> tuple[int, str, list[str]]:
+    """Empfängerkreis für die v2-Schnittstelle: Typ, Beschreibung und Hinweise."""
+    persons, groups, notes = id_list(rule.ucr_ids), id_list(rule.group_ids), []
+    if persons:
+        ntype, audience = 4, "nur die angekreuzten Personen"
+        if groups:
+            notes.append("Gruppen und Personen sind beide angekreuzt. Bei diesem Übertragungsweg zählen dann nur die Personen.")
+    elif groups:
+        ntype, audience = 3, "nur die angekreuzten Gruppen"
+    else:
+        ntype, audience = 2, "alle Mitglieder der Einheit"
+    if (rule.ric or "").strip():
+        notes.append("Die RIC wird bei diesem Übertragungsweg nicht übertragen. Kreuze stattdessen Gruppen oder Personen an.")
+    return ntype, audience, notes
+
+
+def build_v2(rule: m.Rule, values: dict, channels: list[str]) -> dict:
+    """Mitteilung (api/v2/news) oder Alarm (api/v2/alarms) mit ausdrücklich gewählten Benachrichtigungswegen."""
+    ntype, _, _ = audience_v2(rule)
+    body: dict = {
+        "title": render(rule.title_tpl, values)[:LIMITS["title"]], "text": render(rule.text_tpl, values)[:LIMITS["text"]],
+        "notification_type": ntype, **{f"send_{name}": name in channels for name, _ in CHANNELS},
+    }
+    address = render(rule.address_tpl, values)[:LIMITS["address"]]
+    if address:
+        body["address"] = address
+    if rule.kind == "alarm":
+        body["priority"] = bool(rule.priority)
+    instructions = {}
+    if ntype == 4:
+        body["user_cluster_relation"] = [int(i) for i in id_list(rule.ucr_ids)]
+        instructions["user_cluster_relation"] = {"mapping": "id"}
+    elif ntype == 3:
+        body["group"] = [int(i) for i in id_list(rule.group_ids)]
+        instructions["group"] = {"mapping": "id"}
+    return {"Alarm" if rule.kind == "alarm" else "News": body, "instructions": instructions}
 
 
 def build_news_v2(rule: m.Rule, values: dict, route: dict) -> dict:
@@ -245,14 +289,14 @@ def build_payload(rule: m.Rule, values: dict) -> dict:
 
 def key_for(tenant: m.Tenant, payload: dict | None = None) -> str:
     """Der passende Accesskey: für die v2-Schnittstelle der persönliche Schlüssel, wenn einer hinterlegt ist."""
-    if (payload is None or "News" in payload) and tenant.accesskey_user_enc:
+    if (payload is None or is_v2(payload)) and tenant.accesskey_user_enc:
         return sec.decrypt(tenant.accesskey_user_enc)
     return sec.decrypt(tenant.accesskey_enc)
 
 
 def refusal_hint(tenant: m.Tenant, payload: dict, detail: str) -> str:
     """Erklärt eine Ablehnung (401/403) der v2-Schnittstelle, je nachdem welcher Schlüssel benutzt wurde."""
-    if "News" not in payload or not re.match(r"HTTP 40[13]\b", detail):
+    if not is_v2(payload) or not re.match(r"HTTP 40[13]\b", detail):
         return ""
     if tenant.accesskey_user_enc:
         return (" Hinweis: Gesendet wurde mit dem persönlichen Accesskey, DIVERA hat ihn trotzdem abgelehnt. Entweder ist es nicht der "
@@ -293,16 +337,26 @@ class _Literal(dict):
         return "{" + str(key) + "}"
 
 
-def manual(rule: m.Rule) -> dict:
-    """Wie preview(), aber für eine von Hand geschriebene Meldung ohne Regel und ohne Beispielnachricht."""
+def manual(rule: m.Rule, channels: list[str] | None = None) -> dict:
+    """Wie preview(), aber für eine von Hand geschriebene Meldung ohne Regel und ohne Beispielnachricht.
+
+    channels = None: Benachrichtigung wie in DIVERA eingestellt (ältere Schnittstelle, kennt RIC).
+    channels = Liste: genau diese Wege (Schnittstelle v2, braucht den persönlichen Accesskey).
+    """
     values = _Literal()
     fields = []
     for key, label, template in (("title", "Stichwort", rule.title_tpl), ("address", "Adresse", rule.address_tpl), ("text", "Text", rule.text_tpl)):
         full = render(template, values)
         fields.append({"key": key, "label": label, "value": full[:LIMITS[key]], "length": len(full), "limit": LIMITS[key]})
-    payload = build_payload(rule, values)
-    return {"fields": fields, "payload": payload, "kind": rule.kind, "priority": bool(rule.priority), "plan": plan(rule),
-            "has_recipient": "News" in payload or any(payload.get(key) for key in RECIPIENT_KEYS)}
+    if channels is None:
+        payload, route, chosen = build_payload(rule, values), plan(rule), "wie in DIVERA eingestellt"
+    else:
+        payload = build_v2(rule, values, channels)
+        ntype, audience, notes = audience_v2(rule)
+        route = {"route": "v2", "push": "push" in channels, "ntype": ntype, "audience": audience, "notes": notes}
+        chosen = ", ".join(label for name, label in CHANNELS if name in channels) or "keine (nur in der App sichtbar)"
+    return {"fields": fields, "payload": payload, "kind": rule.kind, "priority": bool(rule.priority), "plan": route, "channels": chosen,
+            "has_recipient": is_v2(payload) or any(payload.get(key) for key in RECIPIENT_KEYS)}
 
 
 def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
@@ -311,12 +365,13 @@ def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
     error = ""
     for attempt in range(3):
         try:
-            if "News" in payload:  # Mitteilung über die JSON-Schnittstelle v2
-                resp = httpx.post(DIVERA_NEWS_URL, params={"accesskey": accesskey}, json=payload, timeout=15)
+            if is_v2(payload):  # Mitteilung oder Alarm über die JSON-Schnittstelle v2
+                url = DIVERA_ALARMS_URL if "Alarm" in payload else DIVERA_NEWS_URL
+                resp = httpx.post(url, params={"accesskey": accesskey}, json=payload, timeout=15)
             else:
                 resp = httpx.post(DIVERA_API_URL, params={"accesskey": accesskey}, data=encode_payload(payload), timeout=15)
             body = resp.text[:300]
-            ok = resp.status_code == 200
+            ok = resp.status_code in (200, 201)
             try:
                 if resp.json().get("success") is False:
                     ok = False

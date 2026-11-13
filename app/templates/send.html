@@ -20,18 +20,24 @@
 <div class="card">
   <h2>Meldung an {{ tenant.name }}</h2>
   <p class="hint">Sendet einmalig eine Meldung an DIVERA, ohne dass eine Regel oder eine eingegangene Nachricht nötig ist. Vor dem Senden erscheint eine Seite zur Bestätigung.</p>
-  <div class="grid">
-    <div><label>Art</label><select name="kind"><option value="news" {{ 'selected' if v.get('kind') != 'alarm' }}>Mitteilung</option><option value="alarm" {{ 'selected' if v.get('kind') == 'alarm' }}>Alarm</option></select>
-      <p class="hint">Mitteilung: reine Information. Alarm: Einsatz mit Alarmton und Rückmeldung.</p></div>
-    <div><label>Benachrichtigung bei Mitteilungen</label><select name="push"><option value="1" {{ 'selected' if v.get('push') != '0' }}>mit Push</option><option value="0" {{ 'selected' if v.get('push') == '0' }}>ohne Push (nur in der App sichtbar)</option></select>
-      <p class="hint">Gilt nur für Mitteilungen. Ohne Push braucht die Löschgruppe einen persönlichen Accesskey, und eine RIC wird nicht übertragen.</p></div>
-  </div>
+  <label>Art</label><select name="kind" style="max-width:320px"><option value="news" {{ 'selected' if v.get('kind') != 'alarm' }}>Mitteilung</option><option value="alarm" {{ 'selected' if v.get('kind') == 'alarm' }}>Alarm</option></select>
+  <p class="hint">Mitteilung: reine Information. Alarm: Einsatz mit Alarmton und Rückmeldung.</p>
   <label>Stichwort</label><input type="text" name="title" value="{{ v.get('title', '') }}" maxlength="50" required>
   <p class="hint">Überschrift der Meldung, höchstens 50 Zeichen.</p>
   <label>Text</label><textarea name="text" maxlength="1000" style="font-family:inherit;font-size:inherit;min-height:120px">{{ v.get('text', '') }}</textarea>
   <p class="hint">Höchstens 1000 Zeichen.</p>
   <label>Adresse (optional)</label><input type="text" name="address" value="{{ v.get('address', '') }}" maxlength="200">
   <p class="hint">Einsatzort für Karte und Navigation.</p>
+</div>
+
+<div class="card">
+  <h2>Benachrichtigung</h2>
+  <label class="check"><input type="radio" name="notify" value="default" {{ 'checked' if v.get('notify') != 'custom' }}> Wie in DIVERA für die Einheit eingestellt</label>
+  <p class="hint">Der übliche Weg. Über welche Wege benachrichtigt wird, bestimmen die Einstellungen in DIVERA. Empfänger lassen sich hier auch per RIC angeben.</p>
+  <label class="check"><input type="radio" name="notify" value="custom" {{ 'checked' if v.get('notify') == 'custom' }}> Nur über diese Wege:</label>
+  <div class="picklist">{% for name, label in channel_list %}<label class="check"><input type="checkbox" name="channel" value="{{ name }}" {{ 'checked' if name in v.get('channels', []) }}> {{ label }}</label>{% endfor %}</div>
+  <p class="hint">Mehrere Wege lassen sich ankreuzen. Ohne Haken erscheint die Meldung nur in der App, ohne jede Benachrichtigung. Dieser Weg nutzt die neuere DIVERA-Schnittstelle: Die Löschgruppe braucht dafür einen persönlichen Accesskey, eine RIC wird nicht übertragen, und Empfänger wählst du über Gruppen oder Personen. SMS und Sprachanruf können in DIVERA Kosten verursachen.</p>
+  {% if not tenant.accesskey_user_enc %}<p class="hint"><span class="tag fehler">Hinweis</span> Bei dieser Löschgruppe ist noch kein persönlicher Accesskey hinterlegt; „Nur über diese Wege" wird DIVERA deshalb ablehnen.</p>{% endif %}
 </div>
 
 <div class="card">

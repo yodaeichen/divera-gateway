@@ -5,7 +5,7 @@
   {% if data.kind != 'news' %}
   <div class="flash err"><strong>Achtung, echter Alarm:</strong> Die Empfänger werden mit Alarmton alarmiert. {% if not manual %}Wenn du nur die Übertragung prüfen willst, geh zurück und stelle die Art auf „Mitteilung (leise)".{% endif %}</div>
   {% else %}
-  <div class="flash">Es wird eine Mitteilung {{ 'mit Push' if data.plan.push else 'ohne Push' }} gesendet, keine Alarmierung.</div>
+  <div class="flash">Es wird eine Mitteilung {{ '' if data.channels is defined else ('mit Push' if data.plan.push else 'ohne Push') }} gesendet, keine Alarmierung.</div>
   {% endif %}
   {% for n in data.plan.notes %}<div class="flash err">{{ n }}</div>{% endfor %}
   {% if data.plan.route == 'v2' and data.plan.ntype == 2 %}<div class="flash err"><strong>Geht an alle Mitglieder der Einheit</strong>, weil weder Gruppe noch Person angekreuzt ist.</div>{% endif %}
@@ -18,11 +18,12 @@
   <table style="margin-top:14px">
     {% if data.plan.route == 'v2' %}
     <tr><th>Geht an</th><td><strong>{{ data.plan.audience }}</strong>{% if data.plan.ntype == 3 %}: {{ groups|join(', ') }}{% elif data.plan.ntype == 4 %}: {{ persons|join(', ') }}{% endif %}</td></tr>
-    <tr><th>Push</th><td>{{ 'ja' if data.plan.push else 'nein' }}</td></tr>
+    <tr><th>{{ 'Benachrichtigung' if data.channels is defined else 'Push' }}</th><td>{{ data.channels if data.channels is defined else ('ja' if data.plan.push else 'nein') }}</td></tr>
     {% else %}
     <tr><th>Empfänger (RIC)</th><td>{{ data.payload.ric or 'keine' }}</td></tr>
     <tr><th>Gruppen</th><td>{{ groups|join(', ') or 'keine' }}</td></tr>
     <tr><th>Personen</th><td>{{ persons|join(', ') or 'keine' }}</td></tr>
+    {% if data.channels is defined %}<tr><th>Benachrichtigung</th><td>{{ data.channels }}</td></tr>{% endif %}
     {% endif %}
   </table>
   <details style="margin-top:12px"><summary>Daten an die DIVERA-API</summary><pre>{{ data.payload|tojson(indent=2) }}</pre></details>
