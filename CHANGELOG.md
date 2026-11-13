@@ -2,6 +2,13 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.32.0
+
+- Pause zwischen zwei automatischen Übergaben an DIVERA, je Quelle einstellbar (Vorgabe 10 Sekunden, 0 = aus):
+  mehrere Nachrichten aus einem Abruf kommen nacheinander an statt gleichzeitig
+- Regelvorschlag bei Betreffs nach dem Muster „Art (Teil, Teil, …)": Zeilen aus der Signatur (Tel, E-Mail, URL)
+  werden nicht mehr als Ausdrücke vorgeschlagen
+
 ## 1.31.0
 
 - Regelvorschläge sind allgemeiner: Die Betreff-Bedingung entsteht aus dem Vergleich mit weiteren Nachrichten desselben

@@ -179,6 +179,9 @@ def suggest(msg: dict, others: list[str] | None = None) -> dict:
 
     if shape:
         got = shape["values"]
+        used = {f["name"] for f in (title, street, city, text) if f}
+        # Zeilen aus Signaturen (Tel, E-Mail, URL …) stehen nicht in jeder Nachricht dieser Art: nur verwendete bleiben
+        regex_lines = [line for line in regex_lines if any("(?P<%s>" % name in line for name in used)]
         regex_lines.insert(0, shape["regex"])
         result["extract_regex"] = "\n".join(regex_lines)
         if not title:

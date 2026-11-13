@@ -667,6 +667,8 @@ async def source_save(request: Request, db: Session = Depends(get_db), user: m.U
         cfg[key] = text(form, "directory_id" if key == "tenant_id" else key)
     if source.type != "webhook":
         cfg["max_age"] = int(form.get("max_age")) if str(form.get("max_age", "")).isdigit() else 0
+        delay = str(form.get("send_delay", ""))
+        cfg["send_delay"] = min(worker.MAX_SEND_DELAY, int(delay)) if delay.isdigit() else worker.DEFAULT_SEND_DELAY
     if secret and str(form.get(secret, "")):
         cfg[secret] = str(form[secret])
     source.config = cfg

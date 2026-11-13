@@ -14,6 +14,17 @@ from . import rules, sources, syslog
 
 log = logging.getLogger("gateway.worker")
 LOG_DAYS = int(os.environ.get("LOG_DAYS", "30"))
+DEFAULT_SEND_DELAY = 10   # Sekunden Pause zwischen zwei automatischen Übergaben an DIVERA
+MAX_SEND_DELAY = 300
+
+
+def send_delay(config: dict) -> int:
+    """Pause der Quelle in Sekunden; ohne Angabe gilt die Vorgabe, 0 schaltet sie ab."""
+    try:
+        value = config.get("send_delay")
+        return max(0, min(MAX_SEND_DELAY, int(value))) if value not in (None, "") else DEFAULT_SEND_DELAY
+    except (ValueError, TypeError, RuntimeError):
+        return DEFAULT_SEND_DELAY
 
 
 def already_processed(db, source_id: int, key: str) -> bool:
@@ -65,12 +76,16 @@ def run_source(source_id: int) -> dict:
                 syslog.note(db, "fehler", "Quelle", f"Abruf von „{source.name}“ fehlgeschlagen", source.last_error, tenant=source.tenant)
         source.last_poll = m.utcnow()
         db.commit()
+        pause, handed_over = send_delay(source.config), False
         for msg in messages:
             if already_processed(db, source.id, msg["id"]):
                 continue
             outcome["new"] += 1
+            if handed_over and pause:   # mehrere Nachrichten aus einem Abruf gehen nacheinander an DIVERA, nicht im selben Augenblick
+                time.sleep(pause)
+                handed_over = False
             try:
-                handle_message(db, source, msg)
+                handed_over = handle_message(db, source, msg) > 0
             except Exception as exc:
                 db.rollback()
                 log.exception("Verarbeitung fehlgeschlagen (Quelle %s)", source.id)

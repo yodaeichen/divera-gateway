@@ -35,6 +35,8 @@
   <label>Abfrageintervall in Sekunden</label><input type="number" name="poll_interval" min="10" max="3600" value="{{ source.poll_interval if source else 30 }}">
   <label>Höchstalter in Minuten (optional)</label><input type="number" name="max_age" min="0" max="100000" value="{{ cfg.max_age or '' }}" placeholder="kein Höchstalter">
   <p class="hint">Leer oder 0: Jede Nachricht wird genau einmal übergeben, egal wie alt sie beim Abruf ist. Mit einem Wert bleiben ältere Nachrichten liegen und erscheinen im Protokoll als „veraltet". Das ist nur sinnvoll, wenn die Quelle Alarme auslöst und nach einem Ausfall keine alten Einsätze nachalarmiert werden sollen.</p>
+  <label>Pause zwischen zwei Übergaben an DIVERA in Sekunden</label><input type="number" name="send_delay" min="0" max="300" value="{{ cfg.send_delay if cfg.send_delay is not none and cfg.send_delay is defined and cfg.send_delay != '' else 10 }}">
+  <p class="hint">Bringt ein Abruf mehrere Nachrichten, auf die eine Regel greift, wartet das Gateway diese Zeit zwischen den Übergaben. So kommen die Meldungen in DIVERA nacheinander an statt im selben Augenblick. Die erste Nachricht geht sofort raus. 0 schaltet die Pause ab.</p>
   {% endif %}
   <label class="check"><input type="checkbox" name="active" {{ 'checked' if not source or source.active }}> Aktiv</label>
   <div class="actions"><button>Speichern</button><a class="btn light" href="/tenants/{{ tenant.id }}">Abbrechen</a></div>

@@ -162,6 +162,8 @@ with TestClient(app, base_url="http://testserver") as c:
     three = sg.suggest({"from": "amt@stadt.example", "subject": S1, "body": fwd_body}, [S2, S3])
     assert one["match_subject"] == "verkehrsrechtliche Anordnung" and three["fields"]["match_subject"] == "verkehrsrechtliche Anordnung"
     assert one["title_tpl"] == "{massnahme} {strasse}" and one["address_tpl"] == "{strasse}, {ortsteil}, {stadt}" and "{zeitraum}" in one["text_tpl"]
+    sig = sg.suggest({"from": "amt@stadt.example", "subject": S1, "body": fwd_body + "\nTel: 02732 000\nE-Mail: amt@stadt.example\nURL: www.stadt.example"})["fields"]
+    assert sig["extract_regex"] == one["extract_regex"] and "\n" not in sig["extract_regex"], "Signaturzeilen werden keine Ausdrücke"
     assert "(?P<von>" not in one["extract_regex"] and "(?P<gesendet>" not in one["extract_regex"], "Kopfzeilen der Weiterleitung sind keine Felder"
     assert one["name"] == "Vorschlag: verkehrsrechtliche Anordnung" and not any("keine Zeilen der Form" in n for n in three["notes"])
     with m.SessionLocal() as db:
@@ -221,6 +223,27 @@ with TestClient(app, base_url="http://testserver") as c:
         fresh = dict(old, subject="Alarm frisch", ts=dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=5))
         assert worker.handle_message(db, mail_src, fresh) == 1
         mail_src.config = dict(mail_src.config, max_age=0); db.commit()
+    # Pause zwischen zwei automatischen Übergaben: Vorgabe 10 s, erste Nachricht sofort, nur nach einer Übergabe
+    assert worker.send_delay({}) == 10 and worker.send_delay({"send_delay": 0}) == 0 and worker.send_delay({"send_delay": "25"}) == 25
+    assert worker.send_delay({"send_delay": 9999}) == 300 and worker.send_delay({"send_delay": "x"}) == 10
+    naps, real_poller, real_sleep = [], sources.POLLERS["m365"], worker.time.sleep
+    now_ = dt.datetime.now(dt.timezone.utc)
+    batch_ = [{"id": "p%d" % i, "from": "a", "subject": s, "body": body if hit else "nichts", "ts": now_}
+              for i, (s, hit) in enumerate([("Alarm eins", True), ("Rundschreiben", False), ("Alarm zwei", True), ("Alarm drei", True)])]
+    sources.POLLERS["m365"] = lambda cfg, state: (batch_, state)
+    worker.time.sleep = naps.append
+    try:
+        assert worker.run_source(1)["new"] == 4 and naps == [10, 10], naps
+        for item in batch_:
+            item["id"] += "x"
+        with m.SessionLocal() as db:
+            src_ = db.get(m.Source, 1); src_.config = dict(src_.config, send_delay=0); db.commit()
+        naps.clear()
+        assert worker.run_source(1)["new"] == 4 and naps == [], "0 schaltet die Pause ab"
+        with m.SessionLocal() as db:
+            src_ = db.get(m.Source, 1); src_.config = dict(src_.config, send_delay=10); src_.last_poll = None; db.commit()
+    finally:
+        sources.POLLERS["m365"], worker.time.sleep = real_poller, real_sleep
     stale = c.get("/logs?status=veraltet").text
     assert "Alarm zu alt" in stale and "Höchstalter von 15 Minuten" in stale and "Alarm uralt" not in stale and "Alarm uralt" in c.get("/logs").text
 
@@ -1025,6 +1048,7 @@ with TestClient(app, base_url="http://testserver") as c:
         assert db.get(m.Source, 1).state == "{}"
     # Höchstalter je Quelle im Formular
     assert 'name="max_age"' in c.get("/sources/1/edit").text
+    assert 'name="send_delay" min="0" max="300" value="10"' in c.get("/sources/1/edit").text
     c.post("/sources/save", data={"csrf": tok, "id": "1", "name": "Leitstelle", "directory_id": "dir-1", "client_id": "cid", "mailbox": "a@b.de",
                                   "folder": "inbox", "active": "on", "max_age": "30"})
     with m.SessionLocal() as db:
