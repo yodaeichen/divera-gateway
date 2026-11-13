@@ -84,3 +84,8 @@ ol.steps { margin:0; padding-left:22px; } ol.steps li { padding:5px 0; }
 #felder h3, .faq h3 { font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:20px 0 6px; }
 .faq details { border-top:1px solid var(--line); padding:9px 0; } .faq details:last-of-type { border-bottom:1px solid var(--line); }
 .faq summary { cursor:pointer; font-weight:600; } .faq details p { margin:8px 0 2px; color:#344054; }
+
+/* Protokoll-Reiter und Stufen des Systemprotokolls */
+.tabs { display:flex; gap:6px; margin:0 0 -1px; } .tabs a { padding:8px 14px; border:1px solid var(--line); border-bottom:0; border-radius:8px 8px 0 0; background:#eef0f4; color:var(--ink); text-decoration:none; }
+.tabs a.on { background:#fff; font-weight:600; } .tabs + .card { border-top-left-radius:0; }
+.tag.warnung { background:#fff1d6; color:var(--warn); } .tag.info { background:#e8f0fb; color:#0b5cad; }

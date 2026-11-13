@@ -691,6 +691,99 @@ with TestClient(app, base_url="http://testserver") as c:
         foreign_batch = db.query(m.ImportBatch).filter_by(tenant_id=2).one().id
     assert e.get(f"/events/batch/{foreign_batch}").status_code == 404 and e.post(f"/events/batch/{foreign_batch}/import", data={"csrf": et}).status_code == 404
 
+    # ---------- Meldung von Hand senden ----------
+    assert "bitte wählen" in c.get("/send").text and 'href="/send"' in c.get("/").text
+    sendform = c.get("/send?tenant=1").text
+    assert "Meldung an FF Musterstadt" in sendform and "Muster, Max" in sendform and '<option value="news" selected>' in sendform
+    assert "Meldung an FF Musterstadt" in e.get("/send").text, "bei nur einer Löschgruppe ist sie vorausgewählt"
+    assert n1.get("/send").status_code == 403 and e.get("/send?tenant=2").status_code == 404 and ">Senden<" not in n1.get("/").text
+    MAN = {"csrf": tok, "tenant_id": "1", "kind": "alarm", "push": "1", "title": "Probe {subject}", "text": "Zeile 1\r\nZeile {x}", "address": "Gerätehaus",
+           "ric": "LZ1", "priority": "on"}
+    assert "Bitte ein Stichwort eintragen" in c.post("/send", data=dict(MAN, title="")).text
+    hand = []
+    keep_send = rules.send_divera
+    rules.send_divera = lambda key, payload: hand.append((key, payload)) or (True, 'HTTP 200: {"success":true}')
+    ask = c.post("/send", data=MAN).text
+    assert "Wirklich an DIVERA senden?" in ask and "Achtung, echter Alarm" in ask and "Probe {subject}" in ask and 'formaction="/send"' in ask and not hand
+    assert "Meldung von Hand" in ask and "Regel wird dabei nicht gespeichert" not in ask
+    back = c.post("/send", data=dict(MAN, edit="1")).text
+    assert 'value="Probe {subject}"' in back and '<option value="alarm" selected>' in back and "Zeile {x}" in back and not hand
+    done = c.post("/send", data=dict(MAN, confirm="ja")).text
+    assert "Alarm „Probe {subject}" in done and "an DIVERA gesendet" in done and len(hand) == 1
+    assert hand[0] == ("geheim123", {"title": "Probe {subject}", "text": "Zeile 1\nZeile {x}", "address": "Gerätehaus", "ric": "LZ1", "priority": "1"}), hand[0]
+    quiet = c.post("/send", data={"csrf": tok, "tenant_id": "1", "kind": "news", "push": "0", "title": "Info", "ucr": ["501"], "confirm": "ja"}).text
+    assert "Mitteilung „Info" in quiet and hand[1][0] == "persoenlich456" and hand[1][1]["News"]["user_cluster_relation"] == [501]
+    assert hand[1][1]["News"]["send_push"] is False
+    rules.send_divera = lambda key, payload: (False, "HTTP 500: kaputt")
+    failed_send = c.post("/send", data=dict(MAN, confirm="ja")).text
+    assert "Senden fehlgeschlagen" in failed_send and 'value="Probe {subject}"' in failed_send
+    rules.send_divera = keep_send
+    handlog = c.get("/logs").text
+    assert "Meldung von Hand" in handlog and "ausgelöst von admin" in handlog
+    assert e.post("/send", data=dict(MAN, csrf=et, tenant_id="2", confirm="ja")).status_code == 404
+    assert n1.post("/send", data=dict(MAN, csrf=n1t, confirm="ja")).status_code == 403
+
+    # ---------- Systemprotokoll ----------
+    def sysrows(**where):
+        with m.SessionLocal() as db:
+            return [(r.level, r.category, r.message, r.detail, r.actor, r.tenant_name) for r in db.query(m.SystemEvent).filter_by(**where).order_by(m.SystemEvent.id)]
+    logins = sysrows(category="Anmeldung")
+    assert any(l[0] == "warnung" and "Fehlgeschlagene Anmeldung als „admin“" in l[2] and "falsches Passwort" in l[3] and "testclient" in l[3] for l in logins), logins[:3]
+    assert any(l[0] == "info" and l[2] == "admin hat sich angemeldet" and l[4] == "admin" for l in logins)
+    assert not any("test-passwort" in str(l) or "nein" == l[3] for l in sysrows()), "Passwörter stehen nie im Protokoll"
+    groups_log = sysrows(category="Löschgruppe")
+    assert groups_log[0][2] == "Löschgruppe „FF Musterstadt“: angelegt, Accesskey geändert" and "geheim123" not in str(groups_log)
+    polls = [r for r in sysrows(category="Quelle") if "Leitstelle" in r[2]]
+    assert sum("Abruf von „Leitstelle“ fehlgeschlagen" in r[2] for r in polls) == 1 and polls[-1][0] == "fehler" and "kaputt" in polls[-1][3] and polls[-1][5] == "FF Musterstadt"
+    sources.POLLERS["m365"] = lambda cfg, state: (_ for _ in ()).throw(RuntimeError("kaputt"))
+    worker.run_source(1); worker.run_source(1)
+    assert sum("Abruf von „Leitstelle“ fehlgeschlagen" in r[2] for r in sysrows(category="Quelle")) == 1, "derselbe Fehler wird nicht bei jeder Abfrage neu protokolliert"
+    sources.POLLERS["m365"] = lambda cfg, state: (_ for _ in ()).throw(RuntimeError("Anmeldung bei Microsoft fehlgeschlagen: Schlüssel abgelaufen"))
+    worker.run_source(1)
+    sources.POLLERS["m365"] = lambda cfg, state: ([], state)
+    worker.run_source(1); worker.run_source(1)
+    tail = [r[2] for r in sysrows(category="Quelle")][-2:]
+    assert tail == ["Abruf von „Leitstelle“ fehlgeschlagen", "Verbindung zu „Leitstelle“ funktioniert wieder"], tail
+    assert any("Schlüssel abgelaufen" in r[3] for r in sysrows(category="Quelle"))
+    mails = sysrows(category="E-Mail-Versand")
+    assert any(r[0] == "fehler" and "Einladung an „neu2“" in r[2] for r in mails) and any(r[0] == "info" and "Einladung an „neu1“ verschickt" in r[2] for r in mails)
+    assert any(r[0] == "fehler" and "Testnachricht" in r[2] and "abgelehnt" in r[3] for r in mails)
+    assert any("Benutzer „neu1“ angelegt" in r[2] and r[4] == "admin" for r in sysrows(category="Benutzer"))
+    assert any("über den Einladungslink ein Passwort festgelegt" in r[2] for r in sysrows(category="Benutzer"))
+    denied = sysrows(category="Berechtigung")
+    assert any("Zugriff verweigert: GET /users" in r[2] and r[4] == "leser" for r in denied) and any(r[4] == "bearb" for r in denied)
+    assert any(r[2].startswith("DIVERA Gateway") and "gestartet" in r[2] for r in sysrows(category="System"))
+    assert any("Empfängerliste konnte nicht" in r[2] for r in sysrows(category="DIVERA"))
+    keep_check, rules.check_key = rules.check_key, lambda key: {"status": 403, "ok": False, "info": "Nicht autorisiert"}
+    c.post("/tenants/1/keycheck", data={"csrf": tok})
+    rules.check_key = keep_check
+    assert any(r[0] == "fehler" and "Schlüsselprüfung: Alarm-Accesskey der Einheit wurde abgelehnt" in r[2] and "HTTP 403" in r[3] for r in sysrows(category="DIVERA"))
+    c.post("/tenants/save", data={"csrf": tok, "id": "1", "name": "FF Musterstadt", "active": "on"})   # Testmodus aus
+    assert sysrows(category="Löschgruppe")[-1][:3] == ("warnung", "Löschgruppe", "Löschgruppe „FF Musterstadt“: Testmodus ausgeschaltet: ab jetzt wird an DIVERA gesendet")
+    c.post("/tenants/save", data={"csrf": tok, "id": "1", "name": "FF Musterstadt", "active": "on", "test_mode": "on"})
+
+    adminsys = c.get("/logs?view=system").text
+    assert "Systemprotokoll" in adminsys and "Fehlgeschlagene Anmeldung" in adminsys and "funktioniert wieder" in adminsys and "Fehler in 24 Std." in adminsys
+    assert "Fehlgeschlagene Anmeldung" not in c.get("/logs?view=system&category=Quelle").text and "Abruf von" in c.get("/logs?view=system&level=fehler").text
+    assert "Fehler in 24 Stunden" in c.get("/").text
+    with m.SessionLocal() as db:
+        db.add(m.SystemEvent(level="fehler", category="Quelle", tenant_id=2, tenant_name="Andere Wehr", message="FREMDER-FEHLER")); db.commit()
+    esys = e.get("/logs?view=system").text     # Bearbeiter, nur Löschgruppe 1, verwaltet keine Benutzer
+    assert "Abruf von „Leitstelle“ fehlgeschlagen" in esys and "FREMDER-FEHLER" not in esys and "hat sich angemeldet" not in esys
+    assert "Zugriff verweigert" not in esys and "Du siehst nur Einträge zu deinen Löschgruppen" in esys and "FREMDER-FEHLER" in adminsys.replace(adminsys, c.get("/logs?view=system").text)
+    assert g.get("/logs?view=system").status_code == 403, "ohne Protokollrecht auch kein Systemprotokoll"
+    # unerwarteter Programmfehler landet im Systemprotokoll
+    import app.main as main_mod
+    crash = TestClient(app, base_url="http://testserver", raise_server_exceptions=False)
+    ct = csrf(crash.get("/login").text); crash.post("/login", data={"csrf": ct, "username": "neu3", "password": "festes-passwort-1"})
+    real_directory = main_mod.directory_of
+    main_mod.directory_of = lambda tenant: (_ for _ in ()).throw(ValueError("absichtlicher Testfehler"))
+    boom = crash.get("/tenants/1")
+    main_mod.directory_of = real_directory
+    assert boom.status_code == 500 and "Systemprotokoll" in boom.text
+    last_sys = sysrows(category="System")[-1]
+    assert last_sys[0] == "fehler" and "Unerwarteter Fehler bei GET /tenants/1" in last_sys[2] and "absichtlicher Testfehler" in last_sys[3] and last_sys[4] == "neu3"
+
     # Rechte wirken sofort, auch in laufenden Sitzungen
     c.post("/users/save", data=dict(VIEW, id=str(leser_id), p_rules="0", tenant=["2"]))
     assert v.get("/tenants/1").status_code == 404 and v.get(f"/rules/{other_rule}/edit").status_code == 403

@@ -1,2 +1,2 @@
 """Versionsnummer des DIVERA Gateway. Bei jeder Veröffentlichung hier und in CHANGELOG.md erhöhen."""
-VERSION = "1.24.0"
+VERSION = "1.25.0"

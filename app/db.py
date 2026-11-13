@@ -22,6 +22,9 @@ def _sqlite_pragmas(conn, _):
 
 
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
+# Eigene Verbindung mit kurzer Wartezeit für das Systemprotokoll: ein Eintrag darf nie eine Anfrage aufhalten.
+log_engine = create_engine(f"sqlite:///{DATA_DIR}/gateway.db", connect_args={"check_same_thread": False, "timeout": 3})
+LogSession = sessionmaker(log_engine, expire_on_commit=False)
 
 
 def utcnow() -> dt.datetime:
@@ -138,6 +141,20 @@ class Log(Base):
     sender: Mapped[str] = mapped_column(String(200), default="")
     subject: Mapped[str] = mapped_column(String(300), default="")
     status: Mapped[str] = mapped_column(String(20), default="")  # gesendet | test | fehler | ignoriert | veraltet
+    detail: Mapped[str] = mapped_column(Text, default="")
+
+
+class SystemEvent(Base):
+    """Ereignisse des Gateways selbst: Anmeldungen, Verbindungsprobleme, Änderungen an der Einrichtung."""
+    __tablename__ = "system_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    level: Mapped[str] = mapped_column(String(10), default="info")  # fehler | warnung | info
+    category: Mapped[str] = mapped_column(String(30), default="System")
+    tenant_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    tenant_name: Mapped[str] = mapped_column(String(120), default="")
+    actor: Mapped[str] = mapped_column(String(80), default="")
+    message: Mapped[str] = mapped_column(String(300), default="")
     detail: Mapped[str] = mapped_column(Text, default="")
 
 

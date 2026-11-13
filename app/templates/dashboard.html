@@ -50,6 +50,7 @@
   </table>
   {% endif %}
   <p class="hint">Gezählt werden die Einträge im Protokoll, auch Testsendungen von Hand. <a href="/logs?status=fehler">Fehlgeschlagene ansehen</a></p>
+  <p>Systemprotokoll: {% if admin.system_errors %}<span class="tag fehler">{{ admin.system_errors }} Fehler in 24 Stunden</span>{% else %}<span class="tag gesendet">keine Fehler in 24 Stunden</span>{% endif %} <a href="/logs?view=system">ansehen</a></p>
 </div>
 <div class="card">
   <h2>Angemeldet <span class="tag {{ 'gesendet' if admin.online else '' }}">{{ admin.online }}</span></h2>

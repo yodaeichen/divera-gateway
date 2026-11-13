@@ -221,6 +221,28 @@ Dabei wird nichts gespeichert und nichts gesendet.
 
 **Testweise an DIVERA senden** überträgt das Ergebnis wirklich, auch im Testmodus, nach einer Bestätigungsseite.
 
+## Meldung von Hand senden
+
+Über „Senden" in der Kopfzeile oder „Meldung senden" auf der Seite einer Löschgruppe lässt sich einmalig eine
+Mitteilung oder ein Alarm an DIVERA schicken, ohne Regel und ohne eingegangene Nachricht. Art, Stichwort, Text, Adresse
+und Empfänger (RIC, Gruppen, Personen) eintragen; vor dem Senden zeigt eine Bestätigungsseite genau, was übertragen wird.
+Der Testmodus der Löschgruppe gilt hier nicht. Nötig ist das Recht „Von Hand an DIVERA senden".
+
+## Systemprotokoll
+
+Das Protokoll hat zwei Reiter. „Meldungen an DIVERA" zeigt jede eingegangene Nachricht mit ihrem Ergebnis. Das
+„Systemprotokoll" zeigt, was im Gateway selbst passiert:
+
+- Abruf eines Postfachs schlägt fehl oder funktioniert wieder (protokolliert wird der Wechsel, nicht jede Abfrage)
+- fehlgeschlagene Verbindungstests, abgelehnte DIVERA-Schlüssel, nicht ladbare Empfängerliste
+- fehlgeschlagener E-Mail-Versand und verschickte Einladungen
+- Anmeldungen, Abmeldungen und Fehlversuche mit Herkunftsadresse, Sperren nach fünf Fehlversuchen
+- Änderungen an Löschgruppen (auch das Ausschalten des Testmodus), Benutzern und Einstellungen
+- verweigerte Zugriffe und unerwartete Programmfehler
+
+Einträge zu einer Löschgruppe sieht, wer diese Löschgruppe und das Protokoll sehen darf. Anmeldungen und allgemeine
+Ereignisse sieht nur, wer Benutzer und Rechte verwaltet. Aufbewahrt wird wie beim übrigen Protokoll (`LOG_DAYS`).
+
 ## Termine importieren
 
 Auf der Seite einer Löschgruppe führt „Termine aus CSV importieren" zum Import, etwa für einen Dienstplan aus Excel.

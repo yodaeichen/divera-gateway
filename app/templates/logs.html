@@ -1,7 +1,27 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Protokoll</h1>
+<p class="tabs"><a class="{{ 'on' if not view }}" href="/logs">Meldungen an DIVERA</a><a class="{{ 'on' if view }}" href="/logs?view=system">Systemprotokoll{% if system_errors %} <span class="tag fehler">{{ system_errors }} Fehler in 24 Std.</span>{% endif %}</a></p>
 <div class="card">
+{% if view %}
+  <form method="get" action="/logs" class="row" style="justify-content:flex-start">
+    <input type="hidden" name="view" value="system">
+    <select name="tenant" style="width:auto"><option value="">alle Löschgruppen</option>{% for t in tenants %}<option value="{{ t.id }}" {{ 'selected' if sel_tenant == t.id }}>{{ t.name }}</option>{% endfor %}</select>
+    <select name="level" style="width:auto"><option value="">jede Stufe</option>{% for key, label in levels %}<option value="{{ key }}" {{ 'selected' if sel_level == key }}>{{ label }}</option>{% endfor %}</select>
+    <select name="category" style="width:auto"><option value="">jeder Bereich</option>{% for c in categories %}<option {{ 'selected' if sel_category == c }}>{{ c }}</option>{% endfor %}</select>
+    <button class="light">Filtern</button>
+  </form>
+  <table>
+  <tr><th>Zeit</th><th>Stufe</th><th>Bereich</th><th>Löschgruppe</th><th>Benutzer</th><th>Ereignis</th><th>Details</th></tr>
+  {% for e in events %}
+  <tr><td style="white-space:nowrap">{{ e.ts|localtime }}</td><td><span class="tag {{ e.level }}">{{ {'fehler': 'Fehler', 'warnung': 'Warnung', 'info': 'Hinweis'}.get(e.level, e.level) }}</span></td>
+    <td>{{ e.category }}</td><td>{{ e.tenant_name }}</td><td>{{ e.actor }}</td><td><strong>{{ e.message }}</strong></td><td class="detail">{{ e.detail }}</td></tr>
+  {% else %}
+  <tr><td colspan="7">Keine Einträge.</td></tr>
+  {% endfor %}
+  </table>
+  <p class="hint">Hier steht, was im Gateway selbst passiert: Verbindungsprobleme mit Postfächern, Ablehnungen durch DIVERA, fehlgeschlagener E-Mail-Versand, Anmeldungen und Fehlversuche, Änderungen an Löschgruppen, Benutzern und Einstellungen sowie unerwartete Fehler. Gezeigt werden die letzten 300 Einträge.{% if not is_admin %} Du siehst nur Einträge zu deinen Löschgruppen; Anmeldungen und allgemeine Ereignisse sieht nur, wer Benutzer und Rechte verwaltet.{% endif %}</p>
+{% else %}
   <form method="get" action="/logs" class="row" style="justify-content:flex-start">
     <select name="tenant" style="width:auto"><option value="">alle Löschgruppen</option>{% for t in tenants %}<option value="{{ t.id }}" {{ 'selected' if sel_tenant == t.id }}>{{ t.name }}</option>{% endfor %}</select>
     <select name="status" style="width:auto"><option value="">jeder Status</option>{% for s in ['gesendet','test','fehler','ignoriert','veraltet'] %}<option {{ 'selected' if sel_status == s }}>{{ s }}</option>{% endfor %}</select>
@@ -9,5 +29,6 @@
   </form>
   {% include "_logtable.html" %}
   <p class="hint">Gezeigt werden die letzten 300 Einträge. Der Mailtext selbst wird nicht gespeichert.</p>
+{% endif %}
 </div>
 {% endblock %}

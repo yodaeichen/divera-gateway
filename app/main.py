@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as m
-from . import access, events, mailer, rules, sources, suggest, worker
+from . import access, events, mailer, rules, sources, suggest, syslog, worker
 from . import security as sec
 from .version import VERSION
 
@@ -48,6 +48,7 @@ async def lifespan(_app):
             db.commit()
             log.info("Erster Benutzer wurde angelegt.")
     log.info("DIVERA Gateway %s gestartet.", VERSION)
+    syslog.record("info", "System", f"DIVERA Gateway {VERSION} gestartet")
     task = asyncio.create_task(worker.loop())
     yield
     task.cancel()
@@ -84,6 +85,7 @@ async def _login_required(_request, _exc):
 
 @app.exception_handler(access.Denied)
 async def _denied(request: Request, exc: access.Denied):
+    syslog.record("warnung", "Berechtigung", f"Zugriff verweigert: {request.method} {request.url.path}", exc.message, actor=who(request))
     if request.url.path == "/rules/preview":
         return JSONResponse({"detail": exc.message}, status_code=403)
     response = templates.TemplateResponse(request, "denied.html", {"message": exc.message, "user": None, "flash": None, "csrf": ""})
@@ -123,6 +125,31 @@ async def read_form(request: Request):
 
 def flash(request: Request, text: str, kind: str = "ok"):
     request.session["flash"] = [kind, text]
+
+
+def who(request: Request) -> str:
+    """Benutzername zur laufenden Sitzung, für das Systemprotokoll."""
+    uid = request.session.get("uid") if "session" in request.scope else None
+    if not uid:
+        return ""
+    try:
+        with m.LogSession() as db:
+            found = db.get(m.User, uid)
+            return found.username if found else ""
+    except Exception:
+        return ""
+
+
+def client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unbekannt"
+
+
+@app.exception_handler(Exception)
+async def _unexpected(request: Request, exc: Exception):
+    """Unerwartete Fehler landen im Systemprotokoll statt nur im Dienstprotokoll des Servers."""
+    log.exception("Unerwarteter Fehler bei %s %s", request.method, request.url.path)
+    syslog.record("fehler", "System", f"Unerwarteter Fehler bei {request.method} {request.url.path}", f"{type(exc).__name__}: {exc}", actor=who(request))
+    return JSONResponse({"detail": "Interner Fehler. Der Vorfall steht im Systemprotokoll."}, status_code=500)
 
 
 def allow(*needs: str):
@@ -195,16 +222,20 @@ async def login(request: Request, db: Session = Depends(get_db)):
     username = text(form, "username", 80)
     recent = [t for t in _failed.get(username.lower(), []) if time.time() - t < 300]
     if len(recent) >= 5:
+        syslog.record("warnung", "Anmeldung", f"Anmeldung für „{username}“ gesperrt nach fünf Fehlversuchen", f"von {client_ip(request)}")
         flash(request, "Zu viele Fehlversuche. Bitte fünf Minuten warten.", "err")
         return go("/login")
     user = db.scalar(select(m.User).where(m.User.username == username))
     stored = user.password_hash if user else sec.hash_password("dummy")
     if not sec.verify_password(str(form.get("password", "")), stored) or not user:
         _failed[username.lower()] = recent + [time.time()]
+        syslog.record("warnung", "Anmeldung", f"Fehlgeschlagene Anmeldung als „{username}“",
+                      f"von {client_ip(request)}, {'falsches Passwort' if user else 'Benutzer unbekannt'}, Versuch {len(recent) + 1}")
         flash(request, "Benutzername oder Passwort falsch.", "err")
         return go("/login")
     _failed.pop(username.lower(), None)
     user.last_login = user.last_seen = m.utcnow()
+    syslog.note(db, "info", "Anmeldung", f"{user.username} hat sich angemeldet", f"von {client_ip(request)}", actor=user.username)
     db.commit()
     request.session.clear()
     request.session["uid"] = user.id
@@ -217,6 +248,7 @@ async def logout(request: Request, db: Session = Depends(get_db)):
     user = db.get(m.User, request.session.get("uid") or 0)
     if user:
         user.last_seen = None  # gilt sofort als abgemeldet
+        syslog.note(db, "info", "Anmeldung", f"{user.username} hat sich abgemeldet", actor=user.username)
         db.commit()
     request.session.clear()
     return go("/login")
@@ -250,7 +282,8 @@ def admin_overview(db: Session, now: dt.datetime) -> dict:
         .group_by(m.Log.tenant_name, m.Log.status)
     for name, status, number in db.execute(week).all():
         per_tenant.setdefault(name or "ohne Löschgruppe", {})[status] = number
-    return {"people": people, "online": sum(1 for p in people if p["online"]), "windows": windows,
+    system_errors = db.scalar(select(func.count(m.SystemEvent.id)).where(m.SystemEvent.level == "fehler", m.SystemEvent.ts >= now - dt.timedelta(hours=24)))
+    return {"people": people, "online": sum(1 for p in people if p["online"]), "windows": windows, "system_errors": system_errors,
             "per_tenant": sorted(per_tenant.items()), "labels": STATUS_LABELS, "minutes": ONLINE_MINUTES}
 
 
@@ -305,6 +338,7 @@ async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.U
     if not form.get("id") and not access.sees_all(user):
         raise access.Denied("Neue Löschgruppen kann nur anlegen, wer alle Löschgruppen sehen darf.")
     tenant = tenant_for(db, user, int(form["id"])) if form.get("id") else m.Tenant()
+    was_new, was_test, was_active = tenant.id is None, tenant.test_mode, tenant.active
     tenant.name = text(form, "name", 120) or "Unbenannt"
     tenant.active = "active" in form
     tenant.test_mode = "test_mode" in form
@@ -315,6 +349,18 @@ async def tenant_save(request: Request, db: Session = Depends(get_db), user: m.U
     if "accesskey_user_clear" in form:
         tenant.accesskey_user_enc = ""
     db.add(tenant)
+    db.flush()
+    changes = []
+    if was_new:
+        changes.append("angelegt")
+    elif was_test != tenant.test_mode:
+        changes.append("Testmodus eingeschaltet" if tenant.test_mode else "Testmodus ausgeschaltet: ab jetzt wird an DIVERA gesendet")
+    if not was_new and was_active != tenant.active:
+        changes.append("aktiviert" if tenant.active else "deaktiviert")
+    if text(form, "accesskey") or text(form, "accesskey_user") or "accesskey_user_clear" in form:
+        changes.append("Accesskey geändert")
+    syslog.note(db, "warnung" if any("ausgeschaltet" in c for c in changes) else "info", "Löschgruppe",
+                f"Löschgruppe „{tenant.name}“: " + (", ".join(changes) or "gespeichert"), tenant=tenant, actor=user.username)
     db.commit()
     flash(request, "Löschgruppe gespeichert.")
     return go(f"/tenants/{tenant.id}")
@@ -334,6 +380,9 @@ async def tenant_keycheck(tid: int, request: Request, db: Session = Depends(get_
         result = await asyncio.to_thread(rules.check_key, key)
         result.update(label=label, missing=False, length=len(key), spaces=key != key.strip())
         checks.append(result)
+        if not result["ok"]:
+            syslog.record("fehler", "DIVERA", f"Schlüsselprüfung: {label} wurde abgelehnt", f"HTTP {result['status']}: {result['info']}",
+                          tenant=tenant, actor=user.username)
     return page(request, "tenant.html", user, tenant=tenant, base_url=str(request.base_url), directory=directory_of(tenant),
                 since={}, checks=checks)
 
@@ -346,6 +395,7 @@ async def tenant_directory(tid: int, request: Request, db: Session = Depends(get
     try:
         directory = await asyncio.to_thread(rules.fetch_directory, rules.key_for(tenant))
     except Exception as exc:
+        syslog.record("fehler", "DIVERA", "Empfängerliste konnte nicht aus DIVERA geladen werden", str(exc), tenant=tenant, actor=user.username)
         flash(request, f"Empfänger konnten nicht geladen werden: {str(exc)[:300]}", "err")
         return go(f"/tenants/{tid}")
     tenant.directory, tenant.directory_ts = json.dumps(directory, ensure_ascii=False), m.utcnow()
@@ -382,10 +432,75 @@ async def tenant_poll(tid: int, request: Request, db: Session = Depends(get_db),
 @app.post("/tenants/{tid}/delete")
 async def tenant_delete(tid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("tenants:2"))):
     await read_form(request)
-    db.delete(tenant_for(db, user, tid))
+    gone = tenant_for(db, user, tid)
+    syslog.note(db, "warnung", "Löschgruppe", f"Löschgruppe „{gone.name}“ mit allen Quellen und Regeln gelöscht", actor=user.username)
+    db.delete(gone)
     db.commit()
     flash(request, "Löschgruppe gelöscht.")
     return go("/")
+
+
+# ---------- Meldung von Hand senden (ohne Regel) ----------
+
+def manual_rule(form, tenant: m.Tenant) -> m.Rule:
+    """Baut aus dem Formular eine Regel nur im Speicher, damit dieselbe Sendelogik wie im Betrieb greift."""
+    return m.Rule(tenant_id=tenant.id, name="Meldung von Hand", active=True, kind="alarm" if form.get("kind") == "alarm" else "news",
+                  push=form.get("push") != "0", priority="priority" in form, ric=text(form, "ric", 300),
+                  ucr_ids=",".join(rules.id_list(form.getlist("ucr")))[:1000], group_ids=",".join(rules.id_list(form.getlist("grp")))[:1000],
+                  title_tpl=text(form, "title", 200), text_tpl=str(form.get("text", "")).replace("\r\n", "\n").strip()[:4000],
+                  address_tpl=text(form, "address", 300), extra_params="", extract_regex="", match_from="", match_subject="", match_body="")
+
+
+def send_page(request, user, db, tenant, **extra):
+    tenants = visible_tenants(db, user)
+    directory = directory_of(tenant) if tenant else {"persons": [], "groups": []}
+    extra.setdefault("v", {})
+    return page(request, "send.html", user, tenants=tenants, tenant=tenant, directory=directory, **extra)
+
+
+@app.get("/send")
+def send_view(request: Request, tenant: int | None = None, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
+    tenants = visible_tenants(db, user)
+    chosen = tenant_for(db, user, tenant) if tenant else (tenants[0] if len(tenants) == 1 else None)
+    return send_page(request, user, db, chosen)
+
+
+@app.post("/send")
+async def send_now(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
+    """Sendet eine von Hand geschriebene Mitteilung oder einen Alarm. Zwei Schritte: Bestätigungsseite, dann Senden."""
+    form = await read_form(request)
+    tenant = tenant_for(db, user, int(form.get("tenant_id") or 0))
+    rule = manual_rule(form, tenant)
+    values = {"kind": rule.kind, "push": "1" if rules.wants_push(rule) else "0", "priority": rule.priority, "ric": rule.ric,
+              "title": rule.title_tpl, "text": rule.text_tpl, "address": rule.address_tpl,
+              "ucr": [int(i) for i in rules.id_list(rule.ucr_ids)], "grp": [int(i) for i in rules.id_list(rule.group_ids)]}
+    error = ""
+    if not tenant.active:
+        error = "Diese Löschgruppe ist inaktiv."
+    elif not rule.title_tpl:
+        error = "Bitte ein Stichwort eintragen."
+    elif not tenant.accesskey_enc:
+        error = "Für diese Löschgruppe ist kein DIVERA-Accesskey hinterlegt."
+    if error or "edit" in form:
+        return send_page(request, user, db, tenant, v=values, error=error)
+    data = rules.manual(rule)
+    directory = directory_of(tenant)
+    def names(kind: str, ids: str) -> list[str]:
+        lookup = {str(entry["id"]): entry["name"] for entry in directory[kind]}
+        return [lookup.get(i, f"ID {i}") for i in rules.id_list(ids)]
+    if form.get("confirm") != "ja":
+        fields = [(k, v) for k, v in form.multi_items() if k not in ("csrf", "confirm", "edit") and isinstance(v, str)]
+        return page(request, "rule_send_confirm.html", user, tenant=tenant, rule=rule, data=data, fields=fields, manual=True,
+                    persons=names("persons", rule.ucr_ids), groups=names("groups", rule.group_ids))
+    ok, detail = await asyncio.to_thread(rules.send_divera, rules.key_for(tenant, data["payload"]), data["payload"])
+    detail += rules.refusal_hint(tenant, data["payload"], detail)
+    db.add(m.Log(tenant_id=tenant.id, tenant_name=tenant.name, source_name="Meldung von Hand", rule_name="",
+                 sender=user.username, subject=rules.title_of(data["payload"])[:300], status="gesendet" if ok else "fehler",
+                 detail=f"{'Alarm' if rule.kind == 'alarm' else 'Mitteilung'} | {detail} | ausgelöst von {user.username}"[:2000]))
+    db.commit()
+    if ok:
+        return send_page(request, user, db, tenant, sent={"kind": rule.kind, "title": rules.title_of(data["payload"]), "detail": detail})
+    return send_page(request, user, db, tenant, v=values, error=f"Senden fehlgeschlagen. Antwort von DIVERA: {detail}")
 
 
 # ---------- Termine aus CSV importieren ----------
@@ -572,6 +687,7 @@ async def source_test(sid: int, request: Request, db: Session = Depends(get_db),
             result = await asyncio.to_thread(sources.TESTERS[source.type], source.config)
         except Exception as exc:
             error = f"{type(exc).__name__}: {str(exc)[:300]}"
+            syslog.record("fehler", "Quelle", f"Verbindungstest von „{source.name}“ fehlgeschlagen", error, tenant=source.tenant, actor=user.username)
     return page(request, "source_test.html", user, tenant=source.tenant, source=source, result=result, error=error,
                 base_url=str(request.base_url))
 
@@ -843,16 +959,34 @@ async def rule_delete(rid: int, request: Request, db: Session = Depends(get_db),
 # ---------- Protokoll und Benutzer ----------
 
 @app.get("/logs")
-def logs_view(request: Request, tenant: int | None = None, status: str = "", db: Session = Depends(get_db),
-              user: m.User = Depends(allow("logs:1"))):
+def logs_view(request: Request, tenant: int | None = None, status: str = "", view: str = "", level: str = "", category: str = "",
+              db: Session = Depends(get_db), user: m.User = Depends(allow("logs:1"))):
     tenants = visible_tenants(db, user)
     visible = [t.id for t in tenants]
+    is_admin = access.perms_of(user)["users"] == 2
+    since = m.utcnow() - dt.timedelta(hours=24)
+    scope = m.SystemEvent.tenant_id.in_(visible) if not is_admin else None  # allgemeine Einträge nur für die Rechteverwaltung
+    problems = select(func.count(m.SystemEvent.id)).where(m.SystemEvent.level == "fehler", m.SystemEvent.ts >= since)
+    system_errors = db.scalar(problems.where(scope) if scope is not None else problems)
+    common = dict(tenants=tenants, sel_tenant=tenant, view="system" if view == "system" else "", system_errors=system_errors, is_admin=is_admin)
+    if view == "system":
+        query = select(m.SystemEvent).order_by(m.SystemEvent.id.desc()).limit(300)
+        if scope is not None:
+            query = query.where(scope)
+        if tenant:
+            query = query.where(m.SystemEvent.tenant_id == tenant)
+        if level:
+            query = query.where(m.SystemEvent.level == level)
+        if category:
+            query = query.where(m.SystemEvent.category == category)
+        return page(request, "logs.html", user, events=db.scalars(query).all(), levels=syslog.LEVELS, categories=syslog.CATEGORIES,
+                    sel_level=level, sel_category=category, logs=[], sel_status="", **common)
     query = select(m.Log).where(m.Log.tenant_id.in_(visible)).order_by(m.Log.id.desc()).limit(300)
     if tenant:
         query = query.where(m.Log.tenant_id == tenant)
     if status:
         query = query.where(m.Log.status == status)
-    return page(request, "logs.html", user, logs=db.scalars(query).all(), tenants=tenants, sel_tenant=tenant, sel_status=status)
+    return page(request, "logs.html", user, logs=db.scalars(query).all(), sel_status=status, **common)
 
 
 # ---------- Benutzer und Rechte ----------
@@ -884,7 +1018,9 @@ async def send_invite(request: Request, db: Session, target: m.User, inviter: m.
     try:
         await asyncio.to_thread(mailer.deliver, settings, target.email, subject, body)
     except RuntimeError as exc:
+        syslog.record("fehler", "E-Mail-Versand", f"Einladung an „{target.username}“ konnte nicht verschickt werden", str(exc), actor=inviter.username)
         return str(exc)
+    syslog.record("info", "E-Mail-Versand", f"Einladung an „{target.username}“ verschickt", target.email, actor=inviter.username)
     return ""
 
 
@@ -961,6 +1097,8 @@ async def users_save(request: Request, db: Session = Depends(get_db), user: m.Us
         db.rollback()
         flash(request, "Nicht gespeichert: Es muss mindestens ein Benutzer übrig bleiben, der Benutzer und Rechte verwalten darf.", "err")
         return go(back)
+    syslog.note(db, "info", "Benutzer", f"Benutzer „{target.username}“ {'angelegt' if created else 'geändert'}",
+                f"Rolle: {access.role_of(target)}" + (", Passwort neu gesetzt" if password and not created else ""), actor=user.username)
     db.commit()
     if invite:
         problem = await send_invite(request, db, target, user)
@@ -1015,6 +1153,7 @@ async def invite_save(token: str, request: Request, db: Session = Depends(get_db
         return go(f"/invite/{token}")
     target.password_hash = sec.hash_password(password)
     target.invite_hash, target.invite_expires = "", None  # Link ist damit verbraucht
+    syslog.note(db, "info", "Benutzer", f"„{target.username}“ hat über den Einladungslink ein Passwort festgelegt", actor=target.username)
     db.commit()
     flash(request, "Passwort gespeichert. Du kannst dich jetzt anmelden.")
     return go("/login")
@@ -1045,6 +1184,7 @@ async def settings_save(request: Request, db: Session = Depends(get_db), user: m
     if "smtp_password_clear" in form:
         values["smtp_password"] = ""
     mailer.save(db, values)
+    syslog.record("info", "Einstellungen", "Einstellungen für den E-Mail-Versand gespeichert", actor=user.username)
     if "send_test" in form:
         to = text(form, "test_to", 200)
         try:
@@ -1052,6 +1192,7 @@ async def settings_save(request: Request, db: Session = Depends(get_db), user: m
                                     "Der E-Mail-Versand des DIVERA Gateway funktioniert.\n")
             flash(request, f"Gespeichert. Testnachricht an {to} verschickt.")
         except RuntimeError as exc:
+            syslog.record("fehler", "E-Mail-Versand", "Testnachricht konnte nicht verschickt werden", str(exc), actor=user.username)
             flash(request, f"Gespeichert, aber die Testnachricht ging nicht raus: {exc}", "err")
     else:
         flash(request, "Einstellungen gespeichert.")
@@ -1064,7 +1205,9 @@ async def users_delete(uid: int, request: Request, db: Session = Depends(get_db)
     if uid == user.id:
         flash(request, "Du kannst dich nicht selbst löschen.", "err")
     else:
-        db.delete(need(db.get(m.User, uid)))
+        removed = need(db.get(m.User, uid))
+        syslog.note(db, "warnung", "Benutzer", f"Benutzer „{removed.username}“ gelöscht", actor=user.username)
+        db.delete(removed)
         db.commit()
         flash(request, "Benutzer gelöscht.")
     return go("/users")
@@ -1085,6 +1228,7 @@ async def account_save(request: Request, db: Session = Depends(get_db), user: m.
     else:
         user.password_hash = sec.hash_password(str(form["password"]))
         db.add(user)
+        syslog.note(db, "info", "Benutzer", f"{user.username} hat das eigene Passwort geändert", actor=user.username)
         db.commit()
         flash(request, "Passwort geändert.")
     return go("/account")

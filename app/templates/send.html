@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Meldung senden</h1>
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+{% if sent %}<div class="flash"><strong>{{ 'Alarm' if sent.kind == 'alarm' else 'Mitteilung' }} „{{ sent.title }}" an DIVERA gesendet.</strong> Antwort von DIVERA: {{ sent.detail }}</div>{% endif %}
+
+<div class="card">
+  <form method="get" action="/send" class="row" style="justify-content:flex-start;margin:0">
+    <label style="margin:0">Löschgruppe</label>
+    <select name="tenant" style="width:auto">{% if not tenant %}<option value="">bitte wählen</option>{% endif %}
+      {% for t in tenants %}<option value="{{ t.id }}" {{ 'selected' if tenant and tenant.id == t.id }}>{{ t.name }}{{ ' (inaktiv)' if not t.active }}</option>{% endfor %}</select>
+    <button class="light">Auswählen</button>
+  </form>
+  {% if not tenants %}<p class="hint">Dir ist noch keine Löschgruppe freigegeben.</p>{% endif %}
+</div>
+
+{% if tenant %}
+<form method="post" action="/send">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="tenant_id" value="{{ tenant.id }}">
+<div class="card">
+  <h2>Meldung an {{ tenant.name }}</h2>
+  <p class="hint">Sendet einmalig eine Meldung an DIVERA, ohne dass eine Regel oder eine eingegangene Nachricht nötig ist. Vor dem Senden erscheint eine Seite zur Bestätigung.</p>
+  <div class="grid">
+    <div><label>Art</label><select name="kind"><option value="news" {{ 'selected' if v.get('kind') != 'alarm' }}>Mitteilung</option><option value="alarm" {{ 'selected' if v.get('kind') == 'alarm' }}>Alarm</option></select>
+      <p class="hint">Mitteilung: reine Information. Alarm: Einsatz mit Alarmton und Rückmeldung.</p></div>
+    <div><label>Benachrichtigung bei Mitteilungen</label><select name="push"><option value="1" {{ 'selected' if v.get('push') != '0' }}>mit Push</option><option value="0" {{ 'selected' if v.get('push') == '0' }}>ohne Push (nur in der App sichtbar)</option></select>
+      <p class="hint">Gilt nur für Mitteilungen. Ohne Push braucht die Löschgruppe einen persönlichen Accesskey, und eine RIC wird nicht übertragen.</p></div>
+  </div>
+  <label>Stichwort</label><input type="text" name="title" value="{{ v.get('title', '') }}" maxlength="50" required>
+  <p class="hint">Überschrift der Meldung, höchstens 50 Zeichen.</p>
+  <label>Text</label><textarea name="text" maxlength="1000" style="font-family:inherit;font-size:inherit;min-height:120px">{{ v.get('text', '') }}</textarea>
+  <p class="hint">Höchstens 1000 Zeichen.</p>
+  <label>Adresse (optional)</label><input type="text" name="address" value="{{ v.get('address', '') }}" maxlength="200">
+  <p class="hint">Einsatzort für Karte und Navigation.</p>
+</div>
+
+<div class="card">
+  <h2>Empfänger</h2>
+  <label>RIC</label><input type="text" name="ric" value="{{ v.get('ric', '') }}" placeholder="LZ1,LZ2">
+  <p class="hint">Alarmierungs-RIC der Gruppen wie in DIVERA hinterlegt, mehrere mit Komma.</p>
+  {% for kind, field, title in [('groups', 'grp', 'Gruppen'), ('persons', 'ucr', 'Einzelne Personen')] %}
+  <label>{{ title }}</label>
+  {% if directory[kind] %}<div class="picklist">{% for e in directory[kind] %}<label class="check"><input type="checkbox" name="{{ field }}" value="{{ e.id }}" {{ 'checked' if e.id in v.get(field, []) }}> {{ e.name }}</label>{% endfor %}</div>
+  {% else %}<p class="hint">Noch keine Liste vorhanden. Bei der Löschgruppe „Empfänger aus DIVERA laden".</p>{% endif %}
+  {% endfor %}
+  <p class="hint">Ohne Angabe eines Empfängers entscheidet DIVERA nach den Einstellungen der Einheit, wer die Meldung bekommt. Die Bestätigungsseite zeigt, was übertragen wird.</p>
+  <label class="check"><input type="checkbox" name="priority" {{ 'checked' if v.get('priority') }}> Sonderrechte / Priorität (nur bei Alarm)</label>
+  <div class="actions"><button>Weiter zur Bestätigung</button><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zur Löschgruppe</a></div>
+</div>
+</form>
+{% endif %}
+{% endblock %}

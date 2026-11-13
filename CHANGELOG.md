@@ -2,6 +2,13 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.25.0
+
+- „Meldung senden": Mitteilung oder Alarm von Hand an DIVERA schicken, ohne Regel, mit Bestätigungsseite
+- Systemprotokoll als zweiter Reiter im Protokoll: Verbindungsprobleme der Postfächer, Ablehnungen durch DIVERA,
+  fehlgeschlagener E-Mail-Versand, Anmeldungen und Fehlversuche, Änderungen an Löschgruppen, Benutzern und Einstellungen,
+  verweigerte Zugriffe und unerwartete Fehler
+
 ## 1.24.0
 
 - Terminimport: Benachrichtigung über mehrere Wege wählbar (Push, SMS, Sprachanruf, E-Mail, Pager)

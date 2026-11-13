@@ -287,6 +287,24 @@ def encode_payload(payload: dict) -> dict:
     return {(f"{key}[]" if isinstance(value, list) else key): value for key, value in payload.items()}
 
 
+class _Literal(dict):
+    """Lässt geschweifte Klammern in von Hand geschriebenen Texten unverändert stehen."""
+    def get(self, key, default=""):
+        return "{" + str(key) + "}"
+
+
+def manual(rule: m.Rule) -> dict:
+    """Wie preview(), aber für eine von Hand geschriebene Meldung ohne Regel und ohne Beispielnachricht."""
+    values = _Literal()
+    fields = []
+    for key, label, template in (("title", "Stichwort", rule.title_tpl), ("address", "Adresse", rule.address_tpl), ("text", "Text", rule.text_tpl)):
+        full = render(template, values)
+        fields.append({"key": key, "label": label, "value": full[:LIMITS[key]], "length": len(full), "limit": LIMITS[key]})
+    payload = build_payload(rule, values)
+    return {"fields": fields, "payload": payload, "kind": rule.kind, "priority": bool(rule.priority), "plan": plan(rule),
+            "has_recipient": "News" in payload or any(payload.get(key) for key in RECIPIENT_KEYS)}
+
+
 def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
     if not accesskey:
         return False, "Kein DIVERA-Accesskey hinterlegt."

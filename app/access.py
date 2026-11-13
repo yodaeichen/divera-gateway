@@ -24,7 +24,7 @@ ROLE_HINTS = {
     "editor": "pflegt Quellen und Regeln und darf senden, aber nichts an Schlüsseln und Benutzern ändern",
     "viewer": "darf nur ansehen",
 }
-SEND_HINT = ("„Testweise an DIVERA senden“, „Jetzt verarbeiten“, „Jetzt abrufen“ und der Import von Terminen. "
+SEND_HINT = ("„Meldung senden“, „Testweise an DIVERA senden“, „Jetzt verarbeiten“, „Jetzt abrufen“ und der Import von Terminen. "
              "Ohne dieses Recht kann der Benutzer von Hand nichts an DIVERA auslösen.")
 
 
