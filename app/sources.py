@@ -9,6 +9,7 @@ import email
 import html
 import imaplib
 import re
+import time
 from email import policy
 from email.utils import parseaddr, parsedate_to_datetime
 from urllib.parse import quote
@@ -17,6 +18,7 @@ import httpx
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 MAX_PER_POLL = 50
+PAGE_SIZE = 10  # Nachrichten je Antwort von Microsoft; weitere Seiten werden nachgeladen
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 PREVIEW_COUNT = 5
 TIMEOUT = 20
@@ -35,12 +37,31 @@ def html_to_text(markup: str) -> str:
 
 # ---------- Microsoft 365 ----------
 
+GRAPH_TIMEOUT = httpx.Timeout(45, connect=10)
+GRAPH_TRIES = 3
+
+
+def _request(method: str, url: str, **kwargs) -> httpx.Response:
+    """Aufruf bei Microsoft mit Geduld: Antwortet der Dienst nicht rechtzeitig oder bricht die Verbindung ab,
+    wird es noch zweimal versucht, bevor der Abruf als fehlgeschlagen gilt."""
+    problem = "unbekannt"
+    for attempt in range(GRAPH_TRIES):
+        try:
+            return httpx.request(method, url, timeout=GRAPH_TIMEOUT, **kwargs)
+        except httpx.TimeoutException:
+            problem = "Microsoft hat nicht rechtzeitig geantwortet (Zeitüberschreitung)"
+        except httpx.TransportError as exc:
+            problem = f"Verbindung zu Microsoft gestört ({type(exc).__name__})"
+        if attempt < GRAPH_TRIES - 1:
+            time.sleep(2 + attempt * 3)
+    raise RuntimeError(f"{problem}, auch nach {GRAPH_TRIES} Versuchen. Meist vorübergehend; der nächste Abruf versucht es erneut.")
+
+
 def _graph_token(cfg: dict) -> str:
-    resp = httpx.post(
+    resp = _request("POST", 
         f"https://login.microsoftonline.com/{cfg['tenant_id']}/oauth2/v2.0/token",
         data={"grant_type": "client_credentials", "client_id": cfg["client_id"],
-              "client_secret": cfg.get("client_secret", ""), "scope": "https://graph.microsoft.com/.default"},
-        timeout=TIMEOUT)
+              "client_secret": cfg.get("client_secret", ""), "scope": "https://graph.microsoft.com/.default"})
     if resp.status_code != 200:
         info = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
         raise RuntimeError("Anmeldung bei Microsoft fehlgeschlagen: " + str(info.get("error_description", resp.status_code))[:300])
@@ -56,7 +77,7 @@ def _find_folder(cfg: dict, headers: dict, parent: str | None, name: str) -> str
     base = f"{GRAPH}/users/{cfg['mailbox']}/mailFolders"
     url = f"{base}/{parent}/childFolders" if parent else base
     escaped = name.replace("'", "''")
-    resp = httpx.get(url, params={"$filter": f"displayName eq '{escaped}'", "$select": "id"}, headers=headers, timeout=TIMEOUT)
+    resp = _request("GET", url, params={"$filter": f"displayName eq '{escaped}'", "$select": "id"}, headers=headers)
     if resp.status_code != 200:
         try:
             reason = resp.json()["error"]["message"]
@@ -91,7 +112,7 @@ def _graph_messages(cfg: dict, params: dict, limit: int = MAX_PER_POLL) -> list[
     url = f"{GRAPH}/users/{cfg['mailbox']}/mailFolders/{folder}/messages"
     items: list[dict] = []
     while url and len(items) < limit:
-        resp = httpx.get(url, params=params, headers=headers, timeout=TIMEOUT)
+        resp = _request("GET", url, params=params, headers=headers)
         if resp.status_code != 200:
             try:
                 reason = resp.json()["error"]["message"]
@@ -113,7 +134,7 @@ def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
     raw = _graph_messages(cfg, {
         "$filter": f"receivedDateTime ge {state['since']}",
         "$orderby": "receivedDateTime asc",
-        "$top": str(MAX_PER_POLL),
+        "$top": str(PAGE_SIZE),
         "$select": "id,internetMessageId,subject,from,body,receivedDateTime",
     })
     seen = set(state.get("seen") or [])
@@ -266,8 +287,8 @@ def test_imap(cfg: dict) -> dict:
 def fetch_m365(cfg: dict, ref: str) -> dict:
     """Holt eine einzelne Nachricht vollständig, als Vorlage für einen Regelvorschlag."""
     headers = {"Authorization": f"Bearer {_graph_token(cfg)}", "Prefer": 'outlook.body-content-type="text"'}
-    resp = httpx.get(f"{GRAPH}/users/{cfg['mailbox']}/messages/{quote(ref, safe='')}",
-                     params={"$select": "internetMessageId,subject,from,body,receivedDateTime"}, headers=headers, timeout=TIMEOUT)
+    resp = _request("GET", f"{GRAPH}/users/{cfg['mailbox']}/messages/{quote(ref, safe='')}",
+                     params={"$select": "internetMessageId,subject,from,body,receivedDateTime"}, headers=headers)
     if resp.status_code != 200:
         raise RuntimeError(f"Graph-Fehler {resp.status_code} beim Laden der Nachricht.")
     item = resp.json()

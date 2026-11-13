@@ -2,6 +2,11 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.29.0
+
+- Abruf von Microsoft-365-Postfächern robuster: längere Wartezeit, zwei Wiederholungen bei Zeitüberschreitung oder
+  Verbindungsabbruch, kleinere Antwortseiten; verständlichere Fehlermeldung
+
 ## 1.28.0
 
 - Die feste Altersgrenze von 15 Minuten entfällt: Jede Nachricht wird genau einmal übergeben, unabhängig vom Alter

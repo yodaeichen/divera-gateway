@@ -839,6 +839,48 @@ with TestClient(app, base_url="http://testserver") as c:
     assert [x["id"] for x in got] == ["A", "B", "C", "D", "E"]
     sources._graph_messages, sources._graph_token = keep_graph, keep_token
 
+    # Zeitüberschreitung bei Microsoft: erst wiederholen, dann verständliche Meldung
+    import httpx as _hx4
+    tries = []
+    class _Ok:
+        status_code = 200
+        def json(self): return {"value": []}
+    def flaky(method, url, **kw):
+        tries.append(method)
+        if len(tries) < 3:
+            raise _hx4.ReadTimeout("The read operation timed out")
+        return _Ok()
+    keep_req, keep_sleep = sources.httpx.request, sources.time.sleep
+    sources.time.sleep = lambda seconds: None
+    sources.httpx.request = flaky
+    assert sources._request("GET", "https://graph.example/x").status_code == 200 and len(tries) == 3
+    sources.httpx.request = lambda method, url, **kw: (_ for _ in ()).throw(_hx4.ReadTimeout("The read operation timed out"))
+    try:
+        sources._request("GET", "https://graph.example/x"); raise SystemExit("kein Fehler")
+    except RuntimeError as exc:
+        assert "nicht rechtzeitig geantwortet" in str(exc) and "nach 3 Versuchen" in str(exc)
+    sources.httpx.request = lambda method, url, **kw: (_ for _ in ()).throw(_hx4.ConnectError("nix"))
+    try:
+        sources._request("POST", "https://login.example/x"); raise SystemExit("kein Fehler")
+    except RuntimeError as exc:
+        assert "Verbindung zu Microsoft gestört (ConnectError)" in str(exc)
+    # der ganze Abrufweg (Anmeldung, Ordner, Nachrichten in Seiten) über die neue Funktion
+    calls4 = []
+    class _R4:
+        status_code = 200
+        def __init__(self, data): self._d = data
+        def json(self): return self._d
+        headers = {"content-type": "application/json"}
+    def graph(method, url, **kw):
+        calls4.append((method, url.split("/v1.0")[-1][:40], (kw.get("params") or {}).get("$top")))
+        if "oauth2" in url: return _R4({"access_token": "t"})
+        if "page=2" in url: return _R4({"value": [gm("P2", "2026-11-02T10:00:00Z")]})
+        return _R4({"value": [gm("P1", "2026-11-01T10:00:00Z")], "@odata.nextLink": "https://graph.microsoft.com/v1.0/next?page=2"})
+    sources.httpx.request = graph
+    got, st = sources.poll_m365({"tenant_id": "d", "client_id": "c", "client_secret": "s", "mailbox": "a@b.de", "folder": "inbox"}, {"since": "2026-10-01T00:00:00Z", "seen": []})
+    assert [x["id"] for x in got] == ["P1", "P2"] and st["since"] == "2026-11-02T10:00:00Z" and calls4[0][0] == "POST" and calls4[1][2] == "10", calls4
+    sources.httpx.request, sources.time.sleep = keep_req, keep_sleep
+
     class FakeImap:
         mails = {1: "Sat, 31 Oct 2026 08:00:00 +0000", 2: "Sun, 01 Nov 2026 09:00:00 +0000", 3: "Sun, 01 Nov 2026 12:00:00 +0000", 4: "Mon, 02 Nov 2026 07:00:00 +0000"}
         def response(self, name): return ("OK", [b"77"])
