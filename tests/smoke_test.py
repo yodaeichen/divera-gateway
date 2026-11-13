@@ -1025,7 +1025,28 @@ with TestClient(app, base_url="http://testserver") as c:
 
     resetpage = c.get("/sources/1/reset").text
     assert "Lesestand zurücksetzen: Leitstelle" in resetpage and "Testmodus" in resetpage and 'type="datetime-local"' in resetpage
-    assert "Zurücksetzen</a>" in c.get("/tenants/1").text and "Zurücksetzen</a>" not in e.get("/tenants/1").text
+    # Nachsenden: einzelne Nachrichten erneut durch die gespeicherten Regeln schicken
+    assert 'href="/sources/1/resend">Nachsenden</a>' in c.get("/tenants/1").text and "Zurücksetzen</a>" not in c.get("/tenants/1").text
+    resend_ts = dt.datetime(2026, 11, 13, 7, 35)
+    sources.RECENT["m365"] = lambda cfg, count: [
+        {"from": "leitstelle@kreis.example", "subject": "Alarm nachsenden", "body": body, "date": "", "ts": resend_ts, "ref": "R=1"},
+        {"from": "x@y.example", "subject": "Rundschreiben", "body": "nichts", "date": "", "ts": resend_ts, "ref": "R=2"}]
+    rs = c.get("/sources/1/resend").text
+    assert "Nachrichten nachsenden: Leitstelle" in rs and rs.count('name="back" value="resend"') == 1 and "keine Regel passt" in rs
+    assert 'value="R=1"' in rs and 'value="R=2"' not in rs and "kein Eintrag" in rs and "Lesestand zurücksetzen" in rs
+    sources.FETCHERS["m365"] = lambda cfg, ref: {"id": "resend-" + ref, "from": "leitstelle@kreis.example", "subject": "Alarm nachsenden", "body": body, "ts": None}
+    with m.SessionLocal() as db:
+        state_before = db.get(m.Source, 1).state
+    for _ in range(2):   # auch mehrfach: Nachsenden ist unabhängig vom Lesestand
+        back = c.post("/sources/1/process", data={"csrf": tok, "ref": "R=1", "back": "resend"})
+        assert "Nachrichten nachsenden" in back.text and "Alarm nachsenden“ verarbeitet, 1 Regel hat gegriffen" in back.text
+    with m.SessionLocal() as db:
+        assert db.get(m.Source, 1).state == state_before
+        assert db.query(m.Log).filter(m.Log.subject == "Alarm nachsenden").count() == 2
+    assert "kein Eintrag" not in c.get("/sources/1/resend").text.split("Alarm nachsenden")[1].split("Rundschreiben")[0]
+    assert c.get("/sources/2/resend").status_code == 400, "Webhooks haben keinen Ordner"
+    sources.RECENT["m365"] = lambda cfg, count: (_ for _ in ()).throw(RuntimeError("Graph-Fehler 502"))
+    assert "konnten nicht geladen werden" in c.get("/sources/1/resend").text
     assert e.get("/sources/1/reset").status_code == 403 and e.post("/sources/1/reset", data={"csrf": et, "mode": "now"}).status_code == 403, "nur für Administratoren"
     assert c.get("/sources/2/reset").status_code == 400, "Webhooks haben keinen Lesestand"
     assert "Datum und Uhrzeit wählen" in c.post("/sources/1/reset", data={"csrf": tok, "mode": "since", "since": ""}).text

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Nachrichten nachsenden: {{ source.name }} <span class="hint">({{ tenant.name }})</span></h1>
+{% if not tenant.active %}<div class="flash err">Die Löschgruppe ist inaktiv, es wird nichts verarbeitet.</div>
+{% elif not tenant.test_mode %}<div class="flash err"><strong>Die Löschgruppe ist scharf.</strong> „Nachsenden" übergibt die Nachricht wirklich an DIVERA, auch wenn sie schon einmal übergeben wurde.</div>
+{% else %}<div class="flash">Die Löschgruppe steht im Testmodus: „Nachsenden" schreibt nur ins Protokoll und sendet nichts an DIVERA.</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+<div class="card">
+  <p>Die letzten {{ rows|length }} Nachrichten im überwachten Ordner. „Nachsenden" schickt genau diese eine Nachricht noch einmal durch die gespeicherten Regeln, sofort und unabhängig davon, ob sie schon gelesen wurde. Der automatische Abruf und sein Lesestand bleiben unberührt.</p>
+  {% if not has_rules %}<p class="hint">Für diese Quelle gibt es noch keine aktive Regel.</p>{% endif %}
+  <table>
+    <tr><th>Eingang</th><th>Absender</th><th>Betreff</th><th>Regel und Stichwort</th><th>Zuletzt</th><th></th></tr>
+    {% for r in rows %}
+    <tr><td style="white-space:nowrap">{{ r.ts|localtime if r.ts else '' }}</td><td>{{ r.from }}</td><td>{{ r.subject }}</td>
+      <td>{% for h in r.hits %}<span class="tag gesendet">{{ h.rule }}</span>{% if h.kind == 'alarm' %} <span class="tag fehler">Alarm</span>{% endif %}<br><strong>{{ h.title }}</strong>{{ '' if loop.last else '<br>'|safe }}{% else %}<span class="tag">keine Regel passt</span>{% endfor %}</td>
+      <td style="white-space:nowrap">{% if r.last %}<span class="tag {{ r.last.status }}">{{ r.last.status }}</span><br><span class="hint">{{ r.last.ts|localtime }}</span>{% else %}<span class="hint">kein Eintrag</span>{% endif %}</td>
+      <td>{% if r.hits and r.ref and tenant.active %}<form method="post" action="/sources/{{ source.id }}/process"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="ref" value="{{ r.ref }}"><input type="hidden" name="back" value="resend"><button class="light" style="white-space:nowrap">Nachsenden</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="6">{{ 'Keine Nachrichten geladen.' if error else 'Der Ordner ist leer.' }}</td></tr>{% endfor %}
+  </table>
+  <p class="hint">„Regel und Stichwort" zeigt, welche gespeicherte Regel greift und was an DIVERA ginge. Passt keine, öffne die Regel und nutze dort „Gegen die letzten Nachrichten prüfen". „Zuletzt" ist der jüngste Protokolleintrag zu dieser Nachricht. Jedes Nachsenden steht im Protokoll.</p>
+  <div class="actions"><a class="btn light" href="/tenants/{{ tenant.id }}">Zurück zur Löschgruppe</a><a class="btn light" href="/logs?tenant={{ tenant.id }}">Protokoll</a>
+    {% if perm.sources >= 2 and perm.users == 2 %}<a class="btn light" href="/sources/{{ source.id }}/reset">Lesestand zurücksetzen …</a>{% endif %}</div>
+</div>
+{% endblock %}

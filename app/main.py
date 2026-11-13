@@ -720,12 +720,43 @@ async def source_process(sid: int, request: Request, db: Session = Depends(get_d
     except Exception as exc:
         flash(request, f"Nachricht konnte nicht verarbeitet werden ({type(exc).__name__}: {str(exc)[:200]})", "err")
         return go(f"/tenants/{source.tenant_id}")
+    back = form.get("back") == "resend"
     if matched:
         mode = "Testmodus: nichts gesendet" if source.tenant.test_mode else "an DIVERA übergeben"
-        flash(request, f"„{msg['subject'][:80]}“ verarbeitet, {matched} {'Regel hat' if matched == 1 else 'Regeln haben'} gegriffen ({mode}). Details stehen unten.")
+        flash(request, f"„{msg['subject'][:80]}“ verarbeitet, {matched} {'Regel hat' if matched == 1 else 'Regeln haben'} gegriffen ({mode}). Details stehen {'im Protokoll' if back else 'unten'}.")
     else:
         flash(request, f"„{msg['subject'][:80]}“ verarbeitet, aber keine Regel passt. Öffne die Regel und prüfe sie mit dieser Nachricht in der Live-Ansicht.", "err")
-    return go(f"/logs?tenant={source.tenant_id}")
+    return go(f"/sources/{sid}/resend" if back else f"/logs?tenant={source.tenant_id}")
+
+
+RESEND_COUNT = 25
+
+
+@app.get("/sources/{sid}/resend")
+async def source_resend(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("sources:1", "send"))):
+    """Zeigt die letzten Nachrichten der Quelle mit der Regel, die greifen würde, und einem Knopf zum Nachsenden je Nachricht."""
+    source = source_for(db, user, sid)
+    if source.type not in sources.RECENT:
+        raise HTTPException(400, "Für diese Quelle nicht möglich")
+    rows, error = [], ""
+    try:
+        recent = await asyncio.to_thread(sources.RECENT[source.type], source.config, RESEND_COUNT)
+    except Exception as exc:
+        recent, error = [], f"Die Nachrichten von „{source.name}“ konnten nicht geladen werden ({type(exc).__name__}: {str(exc)[:200]})."
+    active = rules.applicable_rules(db, source)
+    for msg in recent:
+        hits = []
+        for rule in active:
+            data = rules.preview(rule, msg)
+            if data["match"]:
+                hits.append({"rule": rule.name, "title": data["fields"][0]["value"], "kind": rule.kind})
+                if rule.stop:
+                    break
+        last = db.scalars(select(m.Log).where(m.Log.tenant_id == source.tenant_id, m.Log.source_name == source.name,
+                                              m.Log.subject == msg["subject"][:300], m.Log.sender == msg["from"][:200])
+                          .order_by(m.Log.id.desc()).limit(1)).first()
+        rows.append({"ts": msg["ts"], "from": msg["from"], "subject": msg["subject"], "ref": msg.get("ref", ""), "hits": hits, "last": last})
+    return page(request, "source_resend.html", user, tenant=source.tenant, source=source, rows=rows, error=error, has_rules=bool(active))
 
 
 @app.get("/sources/{sid}/reset")

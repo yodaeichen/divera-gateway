@@ -387,7 +387,7 @@ def recent_m365(cfg: dict, count: int) -> list[dict]:
     for item in raw:
         received = item.get("receivedDateTime", "")
         result.append({"from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""), "subject": item.get("subject") or "",
-                       "body": _graph_body(cfg, item), "date": received,
+                       "body": _graph_body(cfg, item), "date": received, "ref": item.get("id", ""),
                        "ts": _naive_utc(dt.datetime.fromisoformat(received.replace("Z", "+00:00"))) if received else None})
     return result
 
@@ -401,7 +401,8 @@ def recent_imap(cfg: dict, count: int) -> list[dict]:
             if status != "OK" or not data or not isinstance(data[0], tuple):
                 continue
             sender, subject, body, ts = _parse_mail(data[0][1])
-            result.append({"from": sender, "subject": subject, "body": body, "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": _naive_utc(ts)})
+            result.append({"from": sender, "subject": subject, "body": body, "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": _naive_utc(ts),
+                           "ref": str(uid)})
     finally:
         try:
             conn.logout()

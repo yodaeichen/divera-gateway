@@ -310,8 +310,10 @@ Meldungen erfolgreich oder fehlgeschlagen sind.
   Nachricht einmal, egal wie alt sie beim Abruf ist. Nach einem Ausfall wird also nachgeholt, was in der Zwischenzeit kam.
 - **Höchstalter (optional):** Bei einer Quelle lässt sich ein Höchstalter in Minuten einstellen. Ältere Nachrichten
   werden dann nur als „veraltet" protokolliert. Sinnvoll für Quellen, die Alarme auslösen.
-- **Zurücksetzen:** Administratoren können den Lesestand einer Quelle zurücksetzen, entweder „ab jetzt neu" oder
-  „erneut lesen ab" einem Zeitpunkt, etwa um den Ablauf mit einer vorhandenen Nachricht noch einmal zu testen.
+- **Nachsenden:** Bei jeder Postfach-Quelle zeigt „Nachsenden" die letzten Nachrichten mit der Regel, die greift.
+  Einzelne Nachrichten lassen sich von dort erneut an DIVERA übergeben, ohne den Lesestand zu ändern.
+- **Lesestand zurücksetzen:** Administratoren können auf der Seite „Nachsenden" den Lesestand zurücksetzen, entweder
+  „ab jetzt neu" oder „erneut lesen ab" einem Zeitpunkt.
 - **Postfächer bleiben unverändert:** Mails werden nur gelesen, nicht markiert, verschoben oder gelöscht.
 - **Ein Prozess:** Der Dienst darf nicht mehrfach parallel laufen, sonst wird doppelt abgefragt.
 

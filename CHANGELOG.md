@@ -2,6 +2,13 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.33.0
+
+- Neue Seite „Nachsenden" je Postfach-Quelle (ersetzt den Knopf „Zurücksetzen"): zeigt die letzten 25 Nachrichten,
+  die greifende Regel, das Stichwort und den letzten Protokollstand; einzelne Nachrichten lassen sich von dort
+  erneut an DIVERA übergeben, ohne den Lesestand zu ändern
+- „Lesestand zurücksetzen" bleibt für Administratoren über die Seite „Nachsenden" erreichbar
+
 ## 1.32.0
 
 - Pause zwischen zwei automatischen Übergaben an DIVERA, je Quelle einstellbar (Vorgabe 10 Sekunden, 0 = aus):

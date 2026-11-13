@@ -12,8 +12,8 @@
     <p class="hint">Alles, was seit diesem Zeitpunkt im überwachten Ordner eingegangen ist, wird beim nächsten Abruf noch einmal gelesen und nach den Regeln verarbeitet, auch wenn es schon übergeben wurde. Je Abruf werden höchstens {{ per_poll }} Nachrichten gelesen. Für einen Test mit einer einzelnen Nachricht den Zeitpunkt kurz vor ihren Eingang legen.</p>
     <label class="check"><input type="radio" name="mode" value="now"> Ab jetzt neu beginnen</label>
     <p class="hint">Vergisst den bisherigen Stand und liest nichts erneut. Verarbeitet wird nur, was ab jetzt eintrifft.</p>
-    <div class="actions"><button>Zurücksetzen</button><a class="btn light" href="/tenants/{{ tenant.id }}">Abbrechen</a></div>
+    <div class="actions"><button>Zurücksetzen</button><a class="btn light" href="/sources/{{ source.id }}/resend">Abbrechen</a></div>
   </form>
-  <p class="hint">Im Postfach selbst ändert sich dadurch nichts. Der Vorgang wird im Systemprotokoll festgehalten. Eine einzelne Nachricht lässt sich auch ohne Zurücksetzen über „Verbindung testen" und „Jetzt verarbeiten" erneut durch die Regeln schicken.</p>
+  <p class="hint">Im Postfach selbst ändert sich dadurch nichts. Der Vorgang wird im Systemprotokoll festgehalten. Einzelne Nachrichten lassen sich ohne Zurücksetzen über <a href="/sources/{{ source.id }}/resend">Nachsenden</a> erneut durch die Regeln schicken.</p>
 </div>
 {% endblock %}
