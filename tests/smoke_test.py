@@ -821,6 +821,7 @@ with TestClient(app, base_url="http://testserver") as c:
     inbox = []
     keep_graph, keep_token = sources._graph_messages, sources._graph_token
     sources._graph_token = lambda cfg: "tok"
+    keep_body, sources._graph_body = sources._graph_body, lambda cfg, item: "T"
     sources._graph_messages = lambda cfg, params, limit=50: [x for x in inbox if x["receivedDateTime"] >= params["$filter"].split(" ge ")[1]]
     msgs0, st = sources.poll_m365({}, {})
     assert msgs0 == [] and st["seen"] == [] and st["since"].endswith("Z"), "erster Lauf merkt nur den Startpunkt"
@@ -837,7 +838,7 @@ with TestClient(app, base_url="http://testserver") as c:
     assert [x["id"] for x in got] == ["E"] and st["seen"] == ["E"], "beim Umstieg wird die zuletzt gelesene Nachricht nicht noch einmal übergeben"
     got, _ = sources.poll_m365({}, {"since": "2026-11-01T10:00:00Z", "seen": []})   # nach einem Zurücksetzen
     assert [x["id"] for x in got] == ["A", "B", "C", "D", "E"]
-    sources._graph_messages, sources._graph_token = keep_graph, keep_token
+    sources._graph_messages, sources._graph_token, sources._graph_body = keep_graph, keep_token, keep_body
 
     # Zeitüberschreitung bei Microsoft: erst wiederholen, dann verständliche Meldung
     import httpx as _hx4
@@ -871,14 +872,52 @@ with TestClient(app, base_url="http://testserver") as c:
         def __init__(self, data): self._d = data
         def json(self): return self._d
         headers = {"content-type": "application/json"}
+    hiccup = {"n": 0}
     def graph(method, url, **kw):
-        calls4.append((method, url.split("/v1.0")[-1][:40], (kw.get("params") or {}).get("$top")))
-        if "oauth2" in url: return _R4({"access_token": "t"})
-        if "page=2" in url: return _R4({"value": [gm("P2", "2026-11-02T10:00:00Z")]})
-        return _R4({"value": [gm("P1", "2026-11-01T10:00:00Z")], "@odata.nextLink": "https://graph.microsoft.com/v1.0/next?page=2"})
+        params4 = kw.get("params") or {}
+        calls4.append((method, url.split("/v1.0")[-1][:60], params4.get("$top"), params4.get("$select")))
+        if "oauth2" in url: return _R4({"access_token": "t", "expires_in": 3600})
+        if "page=2" in url: return _R4({"value": [dict(gm("P2", "2026-11-02T10:00:00Z"), bodyPreview="Anfang P2")]})
+        if url.endswith("/messages/gP1"):
+            hiccup["n"] += 1
+            if hiccup["n"] == 1:           # einmal 502, dann geht es
+                bad = _R4({}); bad.status_code = 502; return bad
+            return _R4({"body": {"content": " Voller Text P1 "}})
+        if str(params4.get("$filter", "")).endswith("2026-11-02T10:00:00Z"):   # Microsoft liefert nur, was zum Filter passt
+            return _R4({"value": [dict(gm("P2", "2026-11-02T10:00:00Z"), bodyPreview="Anfang P2")]})
+        if url.endswith("/messages/gP2"):  # diese Nachricht lässt sich nie laden
+            bad = _R4({}); bad.status_code = 502; return bad
+        return _R4({"value": [dict(gm("P1", "2026-11-01T10:00:00Z"), bodyPreview="Anfang P1")], "@odata.nextLink": "https://graph.microsoft.com/v1.0/next?page=2"})
     sources.httpx.request = graph
-    got, st = sources.poll_m365({"tenant_id": "d", "client_id": "c", "client_secret": "s", "mailbox": "a@b.de", "folder": "inbox"}, {"since": "2026-10-01T00:00:00Z", "seen": []})
-    assert [x["id"] for x in got] == ["P1", "P2"] and st["since"] == "2026-11-02T10:00:00Z" and calls4[0][0] == "POST" and calls4[1][2] == "10", calls4
+    CFG4 = {"tenant_id": "d", "client_id": "c", "client_secret": "s", "mailbox": "a@b.de", "folder": "inbox"}
+    got, st = sources.poll_m365(CFG4, {"since": "2026-10-01T00:00:00Z", "seen": []})
+    assert [x["id"] for x in got] == ["P1", "P2"] and st["since"] == "2026-11-02T10:00:00Z" and calls4[0][0] == "POST", calls4
+    assert calls4[1][2] == "25" and "body," not in calls4[1][3] and "bodyPreview" in calls4[1][3], "die Liste kommt ohne Texte"
+    assert got[0]["body"] == "Voller Text P1" and got[1]["body"] == "Anfang P2", "Text einzeln geholt; scheitert das, gilt der Textanfang"
+    assert sum(1 for x in calls4 if x[0] == "POST") == 1, "Token wird wiederverwendet"
+    before4 = len(calls4)
+    assert sources.poll_m365(CFG4, st)[0] == [] and len(calls4) == before4 + 1, "ohne neue Mail nur die Listenabfrage, kein Text und keine neue Anmeldung"
+    flaky_status = {"n": 0}
+    def storm(method, url, **kw):
+        flaky_status["n"] += 1
+        bad = _R4({}); bad.status_code = 502; bad.text = ""; return bad
+    sources.httpx.request = storm
+    try:
+        sources._graph_messages(CFG4, {"$top": "1"}); raise SystemExit("kein Fehler")
+    except RuntimeError as exc:
+        assert "vorübergehende Störung (HTTP 502), auch nach 3 Versuchen" in str(exc) and flaky_status["n"] == 3, str(exc)
+    sources._TOKENS.clear(); sources._FOLDERS.clear()
+    looked = []
+    def sub(method, url, **kw):
+        looked.append(url.split("/v1.0")[-1])
+        if "oauth2" in url: return _R4({"access_token": "t", "expires_in": 3600})
+        if url.endswith("/childFolders"): return _R4({"value": [{"id": "ORDNER-ID"}]})
+        return _R4({"value": []})
+    sources.httpx.request = sub
+    SUB = dict(CFG4, folder="Posteingang/Alarme")
+    sources._graph_messages(SUB, {"$top": "1"}); sources._graph_messages(SUB, {"$top": "1"})
+    assert sum(1 for u in looked if u.endswith("/childFolders")) == 1 and looked[-1].endswith("/mailFolders/ORDNER-ID/messages"), looked
+    sources._TOKENS.clear(); sources._FOLDERS.clear()
     sources.httpx.request, sources.time.sleep = keep_req, keep_sleep
 
     class FakeImap:

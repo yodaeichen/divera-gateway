@@ -2,6 +2,13 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.30.0
+
+- Microsoft 365: Die Nachrichtenliste wird ohne Texte abgefragt, der Text nur für neue Nachrichten einzeln geholt;
+  das vermeidet Zeitüberschreitungen und Störungsmeldungen (502) bei größeren Ordnern
+- Wiederholung auch bei HTTP 429, 502, 503 und 504 von Microsoft
+- Das Zugangs-Token und die ID eines Unterordners werden eine Stunde wiederverwendet statt bei jedem Abruf neu geholt
+
 ## 1.29.0
 
 - Abruf von Microsoft-365-Postfächern robuster: längere Wartezeit, zwei Wiederholungen bei Zeitüberschreitung oder

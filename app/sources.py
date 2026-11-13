@@ -18,7 +18,8 @@ import httpx
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 MAX_PER_POLL = 50
-PAGE_SIZE = 10  # Nachrichten je Antwort von Microsoft; weitere Seiten werden nachgeladen
+PAGE_SIZE = 25  # Listeneinträge je Antwort von Microsoft (ohne Text); weitere Seiten werden nachgeladen
+RETRY_STATUS = {429, 502, 503, 504}
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 PREVIEW_COUNT = 5
 TIMEOUT = 20
@@ -46,18 +47,44 @@ def _request(method: str, url: str, **kwargs) -> httpx.Response:
     wird es noch zweimal versucht, bevor der Abruf als fehlgeschlagen gilt."""
     problem = "unbekannt"
     for attempt in range(GRAPH_TRIES):
+        pause = 2 + attempt * 3
         try:
-            return httpx.request(method, url, timeout=GRAPH_TIMEOUT, **kwargs)
+            resp = httpx.request(method, url, timeout=GRAPH_TIMEOUT, **kwargs)
+            if resp.status_code not in RETRY_STATUS:
+                return resp
+            # 429 = zu viele Anfragen, 502/503/504 = Störung bei Microsoft: kurz warten und noch einmal versuchen
+            problem = f"Microsoft meldet eine vorübergehende Störung (HTTP {resp.status_code})"
+            wait = resp.headers.get("Retry-After", "") if hasattr(resp, "headers") else ""
+            if str(wait).isdigit():
+                pause = min(int(wait), 20)
         except httpx.TimeoutException:
             problem = "Microsoft hat nicht rechtzeitig geantwortet (Zeitüberschreitung)"
         except httpx.TransportError as exc:
             problem = f"Verbindung zu Microsoft gestört ({type(exc).__name__})"
         if attempt < GRAPH_TRIES - 1:
-            time.sleep(2 + attempt * 3)
+            time.sleep(pause)
     raise RuntimeError(f"{problem}, auch nach {GRAPH_TRIES} Versuchen. Meist vorübergehend; der nächste Abruf versucht es erneut.")
 
 
+_TOKENS: dict[tuple, tuple[str, float]] = {}
+
+
 def _graph_token(cfg: dict) -> str:
+    """Zugangs-Token von Microsoft. Es gilt etwa eine Stunde und wird so lange wiederverwendet, statt bei jedem Abruf neu geholt."""
+    cache_key = (cfg.get("tenant_id"), cfg.get("client_id"), cfg.get("client_secret", ""))
+    cached = _TOKENS.get(cache_key)
+    if cached and cached[1] > time.time():
+        return cached[0]
+    token, lifetime = _new_token(cfg)
+    _TOKENS[cache_key] = (token, time.time() + max(60, lifetime - 300))
+    return token
+
+
+def _forget_token(cfg: dict):
+    _TOKENS.pop((cfg.get("tenant_id"), cfg.get("client_id"), cfg.get("client_secret", "")), None)
+
+
+def _new_token(cfg: dict) -> tuple[str, int]:
     resp = _request("POST", 
         f"https://login.microsoftonline.com/{cfg['tenant_id']}/oauth2/v2.0/token",
         data={"grant_type": "client_credentials", "client_id": cfg["client_id"],
@@ -65,7 +92,18 @@ def _graph_token(cfg: dict) -> str:
     if resp.status_code != 200:
         info = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
         raise RuntimeError("Anmeldung bei Microsoft fehlgeschlagen: " + str(info.get("error_description", resp.status_code))[:300])
-    return resp.json()["access_token"]
+    data = resp.json()
+    return data["access_token"], int(data.get("expires_in") or 3600)
+
+
+def _graph_error(cfg: dict, resp) -> RuntimeError:
+    if resp.status_code == 401:
+        _forget_token(cfg)  # Token abgelaufen oder widerrufen: beim nächsten Abruf neu anmelden
+    try:
+        reason = resp.json()["error"]["message"]
+    except Exception:
+        reason = getattr(resp, "text", "")
+    return RuntimeError(f"Graph-Fehler {resp.status_code}: {str(reason)[:300] or 'ohne nähere Angabe von Microsoft'}")
 
 
 WELL_KNOWN = {"inbox", "archive", "drafts", "sentitems", "deleteditems", "junkemail", "outbox", "msgfolderroot"}
@@ -79,18 +117,29 @@ def _find_folder(cfg: dict, headers: dict, parent: str | None, name: str) -> str
     escaped = name.replace("'", "''")
     resp = _request("GET", url, params={"$filter": f"displayName eq '{escaped}'", "$select": "id"}, headers=headers)
     if resp.status_code != 200:
-        try:
-            reason = resp.json()["error"]["message"]
-        except Exception:
-            reason = resp.text
-        raise RuntimeError(f"Graph-Fehler {resp.status_code}: {reason[:300]}")
+        raise _graph_error(cfg, resp)
     found = resp.json().get("value", [])
     if not found:
         raise RuntimeError(f"Ordner '{name}' nicht gefunden. Schreibweise wie in Outlook, Unterordner mit / trennen.")
     return found[0]["id"]
 
 
+_FOLDERS: dict[tuple, tuple[str, float]] = {}
+
+
 def _resolve_folder(cfg: dict, headers: dict) -> str:
+    """Wie _lookup_folder, merkt sich das Ergebnis aber eine Stunde: Die Ordner-ID ändert sich nicht, und so entfallen
+    bei Unterordnern ein bis zwei zusätzliche Anfragen je Abruf."""
+    cache_key = (cfg.get("mailbox"), (cfg.get("folder") or "inbox").strip().lower())
+    cached = _FOLDERS.get(cache_key)
+    if cached and cached[1] > time.time():
+        return cached[0]
+    folder = _lookup_folder(cfg, headers)
+    _FOLDERS[cache_key] = (folder, time.time() + 3600)
+    return folder
+
+
+def _lookup_folder(cfg: dict, headers: dict) -> str:
     """Erlaubt Pfade wie 'Posteingang/Alarme/Leitstelle', Standardnamen wie 'inbox' oder eine Ordner-ID."""
     parts = [p.strip() for p in (cfg.get("folder") or "inbox").replace("\\", "/").split("/") if p.strip()] or ["inbox"]
     first = ALIASES.get(parts[0].lower(), parts[0])
@@ -114,15 +163,29 @@ def _graph_messages(cfg: dict, params: dict, limit: int = MAX_PER_POLL) -> list[
     while url and len(items) < limit:
         resp = _request("GET", url, params=params, headers=headers)
         if resp.status_code != 200:
-            try:
-                reason = resp.json()["error"]["message"]
-            except Exception:
-                reason = resp.text
-            raise RuntimeError(f"Graph-Fehler {resp.status_code}: {reason[:300]}")
+            if resp.status_code == 404:  # Ordner umbenannt oder gelöscht: beim nächsten Abruf neu suchen
+                _FOLDERS.pop((cfg.get("mailbox"), (cfg.get("folder") or "inbox").strip().lower()), None)
+            raise _graph_error(cfg, resp)
         data = resp.json()
         items.extend(data.get("value", []))
         url, params = data.get("@odata.nextLink"), None
     return items[:limit]
+
+
+def _graph_body(cfg: dict, item: dict) -> str:
+    """Holt den Text einer einzelnen Nachricht. Die Liste wird ohne Texte abgefragt, weil das Umwandeln vieler Mails
+    in einer Antwort bei Microsoft zu Zeitüberschreitungen führt. Scheitert es bei einer Nachricht, wird ihr
+    Textanfang verwendet, damit eine einzelne problematische Mail nicht das ganze Postfach blockiert."""
+    headers = {"Authorization": f"Bearer {_graph_token(cfg)}", "Prefer": 'outlook.body-content-type="text"'}
+    try:
+        resp = _request("GET", f"{GRAPH}/users/{cfg['mailbox']}/messages/{quote(item['id'], safe='')}", params={"$select": "body"}, headers=headers)
+        if resp.status_code == 200:
+            return ((resp.json().get("body") or {}).get("content") or "").strip()
+        if resp.status_code == 401:
+            _forget_token(cfg)
+    except RuntimeError:
+        pass
+    return (item.get("bodyPreview") or "").strip()
 
 
 def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
@@ -135,7 +198,7 @@ def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
         "$filter": f"receivedDateTime ge {state['since']}",
         "$orderby": "receivedDateTime asc",
         "$top": str(PAGE_SIZE),
-        "$select": "id,internetMessageId,subject,from,body,receivedDateTime",
+        "$select": "id,internetMessageId,subject,from,bodyPreview,receivedDateTime",
     })
     seen = set(state.get("seen") or [])
     legacy = "seen" not in state  # Stand aus einer Version vor 1.28: was genau zum gemerkten Zeitpunkt einging, gilt als gelesen
@@ -153,7 +216,7 @@ def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
             "id": key,
             "from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
             "subject": item.get("subject") or "",
-            "body": ((item.get("body") or {}).get("content") or "").strip(),
+            "body": _graph_body(cfg, item),
             "date": received, "ts": ts,
         })
         if received and received > newest:
