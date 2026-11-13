@@ -17,6 +17,7 @@ import httpx
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 MAX_PER_POLL = 50
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 PREVIEW_COUNT = 5
 TIMEOUT = 20
 
@@ -104,28 +105,41 @@ def _graph_messages(cfg: dict, params: dict, limit: int = MAX_PER_POLL) -> list[
 
 
 def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
+    """Holt alles ab dem gemerkten Zeitpunkt. Was bei genau diesem Zeitpunkt schon gelesen wurde, steht in state["seen"]
+    und wird nicht noch einmal geliefert: So wird jede Nachricht genau einmal übergeben, egal wie alt sie ist."""
     if "since" not in state:
         _graph_token(cfg)  # Zugang prüfen, Startpunkt merken
-        return [], {"since": _now().strftime("%Y-%m-%dT%H:%M:%SZ")}
+        return [], {"since": _now().strftime("%Y-%m-%dT%H:%M:%SZ"), "seen": []}
     raw = _graph_messages(cfg, {
         "$filter": f"receivedDateTime ge {state['since']}",
         "$orderby": "receivedDateTime asc",
         "$top": str(MAX_PER_POLL),
         "$select": "id,internetMessageId,subject,from,body,receivedDateTime",
     })
-    messages = []
+    seen = set(state.get("seen") or [])
+    legacy = "seen" not in state  # Stand aus einer Version vor 1.28: was genau zum gemerkten Zeitpunkt einging, gilt als gelesen
+    newest, at_newest, messages = state["since"], list(state.get("seen") or []), []
     for item in raw:
         received = item.get("receivedDateTime", "")
+        key = item.get("internetMessageId") or item["id"]
+        if key in seen:
+            continue
+        if legacy and received == state["since"]:
+            at_newest.append(key)
+            continue
         ts = dt.datetime.fromisoformat(received.replace("Z", "+00:00")) if received else _now()
         messages.append({
-            "id": item.get("internetMessageId") or item["id"],
+            "id": key,
             "from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
             "subject": item.get("subject") or "",
             "body": ((item.get("body") or {}).get("content") or "").strip(),
             "date": received, "ts": ts,
         })
-        state = {"since": received or state["since"]}
-    return messages, state
+        if received and received > newest:
+            newest, at_newest = received, [key]
+        elif received == newest:
+            at_newest.append(key)
+    return messages, {"since": newest, "seen": at_newest[-200:]}
 
 
 def _naive_utc(value: dt.datetime) -> dt.datetime:
@@ -192,18 +206,29 @@ def poll_imap(cfg: dict, state: dict) -> tuple[list[dict], dict]:
     try:
         validity = (conn.response("UIDVALIDITY")[1] or [b"0"])[0]
         validity = validity.decode() if isinstance(validity, bytes) else str(validity)
-        if state.get("uidvalidity") != validity or "last_uid" not in state:
+        rewind = None
+        if state.get("rewind"):
+            # Zurückgesetzt: einmalig alles ab dem gewählten Zeitpunkt erneut lesen, danach normal weiter
+            rewind = dt.datetime.fromisoformat(state["rewind"].replace("Z", "+00:00"))
+            day = rewind - dt.timedelta(days=1)  # IMAP sucht nur tagesgenau und in Serverzeit, daher großzügig
+            everything = _imap_uids(conn, "ALL")
+            uids = _imap_uids(conn, f"SINCE {day.day:02d}-{_MONTHS[day.month - 1]}-{day.year}")[-MAX_PER_POLL:]
+            last = everything[-1] if everything else 0
+        elif state.get("uidvalidity") != validity or "last_uid" not in state:
             uids = _imap_uids(conn, "ALL")
             return [], {"uidvalidity": validity, "last_uid": uids[-1] if uids else 0}
-        last = int(state["last_uid"])
-        uids = [u for u in _imap_uids(conn, f"UID {last + 1}:*") if u > last][:MAX_PER_POLL]
+        else:
+            last = int(state["last_uid"])
+            uids = [u for u in _imap_uids(conn, f"UID {last + 1}:*") if u > last][:MAX_PER_POLL]
         messages = []
         for uid in uids:
             status, data = conn.uid("fetch", str(uid), "(BODY.PEEK[])")
-            last = uid
+            last = max(last, uid)
             if status != "OK" or not data or not isinstance(data[0], tuple):
                 continue
             sender, subject, body, ts = _parse_mail(data[0][1])
+            if rewind is not None and ts < rewind:
+                continue
             messages.append({"id": f"{validity}:{uid}", "from": sender, "subject": subject, "body": body,
                              "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": ts})
         return messages, {"uidvalidity": validity, "last_uid": last}

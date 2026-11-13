@@ -2,6 +2,14 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 1.28.0
+
+- Die feste Altersgrenze von 15 Minuten entfällt: Jede Nachricht wird genau einmal übergeben, unabhängig vom Alter
+- Optionales Höchstalter je Quelle für Quellen, die Alarme auslösen
+- Administratoren können den Lesestand einer Quelle zurücksetzen („ab jetzt neu" oder „erneut lesen ab" einem Zeitpunkt)
+- Behoben: Die zuletzt gelesene Nachricht eines Microsoft-365-Postfachs konnte nach einer Woche ohne neue Mails erneut übergeben werden
+- Die Einstellung `MAX_AGE_MINUTES` wird nicht mehr ausgewertet
+
 ## 1.27.0
 
 - Startseite aufgeräumt: „Letzte Ereignisse" steht nicht mehr dort, sondern nur noch unter „Protokoll"

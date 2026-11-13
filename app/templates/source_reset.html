@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Lesestand zurücksetzen: {{ source.name }} <span class="hint">({{ tenant.name }})</span></h1>
+{% if not tenant.test_mode %}<div class="flash err"><strong>Die Löschgruppe ist scharf.</strong> Erneut gelesene Nachrichten, auf die eine Regel passt, gehen wirklich an DIVERA. Zum gefahrlosen Ausprobieren vorher bei der Löschgruppe den Testmodus einschalten.</div>
+{% else %}<div class="flash">Die Löschgruppe steht im Testmodus: Erneut gelesene Nachrichten werden nur ins Protokoll geschrieben und nicht an DIVERA gesendet.</div>{% endif %}
+<div class="card">
+  <p>Das Gateway merkt sich je Quelle, bis wohin es gelesen hat, und übergibt jede Nachricht genau einmal. Hier kannst du diesen Stand zurücksetzen, zum Beispiel um den Ablauf mit einer bereits eingegangenen Nachricht noch einmal zu testen. Zurzeit sind {{ remembered }} Nachrichten als gelesen vorgemerkt.</p>
+  <form method="post" action="/sources/{{ source.id }}/reset">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="check"><input type="radio" name="mode" value="since" checked> Nachrichten erneut lesen ab:
+      <input type="datetime-local" name="since" value="{{ suggestion }}" style="width:auto"></label>
+    <p class="hint">Alles, was seit diesem Zeitpunkt im überwachten Ordner eingegangen ist, wird beim nächsten Abruf noch einmal gelesen und nach den Regeln verarbeitet, auch wenn es schon übergeben wurde. Je Abruf werden höchstens {{ per_poll }} Nachrichten gelesen. Für einen Test mit einer einzelnen Nachricht den Zeitpunkt kurz vor ihren Eingang legen.</p>
+    <label class="check"><input type="radio" name="mode" value="now"> Ab jetzt neu beginnen</label>
+    <p class="hint">Vergisst den bisherigen Stand und liest nichts erneut. Verarbeitet wird nur, was ab jetzt eintrifft.</p>
+    <div class="actions"><button>Zurücksetzen</button><a class="btn light" href="/tenants/{{ tenant.id }}">Abbrechen</a></div>
+  </form>
+  <p class="hint">Im Postfach selbst ändert sich dadurch nichts. Der Vorgang wird im Systemprotokoll festgehalten. Eine einzelne Nachricht lässt sich auch ohne Zurücksetzen über „Verbindung testen" und „Jetzt verarbeiten" erneut durch die Regeln schicken.</p>
+</div>
+{% endblock %}

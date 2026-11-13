@@ -45,6 +45,7 @@
     </td>
     <td style="white-space:nowrap">
       <form class="inline" method="post" action="/sources/{{ s.id }}/test"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">{{ 'Letzter Empfang' if s.type == 'webhook' else 'Verbindung testen' }}</button></form>
+      {% if perm.sources >= 2 and perm.users == 2 and s.type != 'webhook' %}<a class="btn light" href="/sources/{{ s.id }}/reset">Zurücksetzen</a>{% endif %}
       {% if perm.sources >= 2 %}{% if s.type == 'webhook' %}<form class="inline" method="post" action="/sources/{{ s.id }}/token"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="light">Adresse erneuern</button></form>{% endif %}
       <form class="inline" method="post" action="/sources/{{ s.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Löschen</button></form>{% endif %}
     </td>

@@ -13,7 +13,6 @@ from . import db as m
 from . import rules, sources, syslog
 
 log = logging.getLogger("gateway.worker")
-MAX_AGE_MIN = int(os.environ.get("MAX_AGE_MINUTES", "15"))
 LOG_DAYS = int(os.environ.get("LOG_DAYS", "30"))
 
 
@@ -29,11 +28,17 @@ def already_processed(db, source_id: int, key: str) -> bool:
 
 
 def handle_message(db, source: m.Source, msg: dict) -> int:
+    # Jede Nachricht wird genau einmal übergeben, unabhängig vom Alter. Nur wenn bei der Quelle ausdrücklich ein
+    # Höchstalter eingestellt ist, bleiben ältere Nachrichten liegen (Schutz vor alten Alarmen nach einem Ausfall).
+    try:
+        limit = int(source.config.get("max_age") or 0)
+    except (ValueError, RuntimeError):
+        limit = 0
     age = dt.datetime.now(dt.timezone.utc) - msg["ts"] if msg.get("ts") else dt.timedelta(0)
-    if age > dt.timedelta(minutes=MAX_AGE_MIN):
+    if limit > 0 and age > dt.timedelta(minutes=limit):
         db.add(m.Log(tenant_id=source.tenant_id, tenant_name=source.tenant.name, source_name=source.name,
                      sender=msg["from"][:200], subject=msg["subject"][:300], status="veraltet",
-                     detail=f"Nachricht ist älter als {MAX_AGE_MIN} Minuten und wurde nicht übergeben."))
+                     detail=f"Nachricht ist älter als das bei der Quelle eingestellte Höchstalter von {limit} Minuten und wurde nicht übergeben."))
         db.commit()
         return 0
     return rules.process_message(db, source, msg)

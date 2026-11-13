@@ -51,6 +51,7 @@
     <tr><td>Postfach</td><td>Die E-Mail-Adresse des Postfachs, das überwacht wird.</td></tr>
     <tr><td>Ordner</td><td><code>Posteingang</code> für den Posteingang, Unterordner als Pfad wie <code>Posteingang/Alarme</code>, geschrieben wie in Outlook.</td></tr>
     <tr><td>Abfrageintervall</td><td>Wie oft das Postfach abgefragt wird, in Sekunden. 30 ist ein guter Wert, kleiner als 10 geht nicht.</td></tr>
+    <tr><td>Höchstalter</td><td>Normalerweise leer: Jede Nachricht wird genau einmal übergeben. Nur für Alarm-Quellen einen Wert in Minuten eintragen, damit nach einem Ausfall keine alten Einsätze nachalarmiert werden.</td></tr>
   </table>
   <h3>Quelle: IMAP</h3>
   <table>
@@ -85,9 +86,11 @@
   <details><summary>Im Protokoll steht „test", aber in DIVERA kommt nichts an.</summary>
     <p>Die Löschgruppe steht im Testmodus. Die Regel hat gegriffen, gesendet wurde absichtlich nicht. Testmodus bei der Löschgruppe ausschalten, wenn alles stimmt.</p></details>
   <details><summary>Im Protokoll steht „veraltet".</summary>
-    <p>Die Nachricht war beim Abruf älter als 15 Minuten, zum Beispiel nach einem Ausfall. Solche Nachrichten werden nicht mehr übergeben, damit kein alter Einsatz neu alarmiert wird.</p></details>
+    <p>Bei der Quelle ist ein Höchstalter eingestellt, und die Nachricht war beim Abruf älter. Ohne Höchstalter wird jede Nachricht genau einmal übergeben, egal wie alt sie ist. Ein Höchstalter ist nur für Quellen sinnvoll, die Alarme auslösen, damit nach einem Ausfall kein alter Einsatz nachalarmiert wird.</p></details>
+  <details><summary>Wie teste ich den Ablauf noch einmal mit einer Nachricht, die schon verarbeitet wurde?</summary>
+    <p>Zwei Wege. Für eine einzelne Nachricht: bei der Quelle „Verbindung testen" und bei der Nachricht „Jetzt verarbeiten". Für den ganzen automatischen Ablauf: als Administrator bei der Quelle „Zurücksetzen" wählen und einen Zeitpunkt kurz vor dem Eingang der Nachricht angeben. Beim nächsten Abruf wird alles ab diesem Zeitpunkt erneut gelesen. Vorher am besten den Testmodus der Löschgruppe einschalten.</p></details>
   <details><summary>Was bedeuten die Statuswerte im Protokoll?</summary>
-    <p><span class="tag gesendet">gesendet</span> an DIVERA übergeben · <span class="tag test">test</span> Regel hat gegriffen, wegen Testmodus nicht gesendet · <span class="tag fehler">fehler</span> DIVERA hat abgelehnt oder war nicht erreichbar, der Grund steht in den Details · <span class="tag ignoriert">ignoriert</span> keine Regel passt · <span class="tag veraltet">veraltet</span> zu alt.</p></details>
+    <p><span class="tag gesendet">gesendet</span> an DIVERA übergeben · <span class="tag test">test</span> Regel hat gegriffen, wegen Testmodus nicht gesendet · <span class="tag fehler">fehler</span> DIVERA hat abgelehnt oder war nicht erreichbar, der Grund steht in den Details · <span class="tag ignoriert">ignoriert</span> keine Regel passt · <span class="tag veraltet">veraltet</span> älter als das bei der Quelle eingestellte Höchstalter.</p></details>
 
   <h3>Regeln und Empfänger</h3>
   <details><summary>Was ist der Unterschied zwischen Mitteilung und Alarm?</summary>

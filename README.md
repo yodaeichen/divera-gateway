@@ -304,7 +304,12 @@ Meldungen erfolgreich oder fehlgeschlagen sind.
   lassen sich über „Verbindung testen > Jetzt verarbeiten" einzeln von Hand durch die Regeln schicken.
 - **Kein Doppelalarm:** Eine Nachricht wird vor der Übergabe als verarbeitet vorgemerkt. Stürzt der Dienst genau
   in diesem Moment ab, geht diese eine Nachricht verloren, statt doppelt zu alarmieren.
-- **Veraltete Nachrichten:** Was älter als `MAX_AGE_MINUTES` ist (z. B. nach einem Ausfall), wird nur protokolliert.
+- **Jede Nachricht genau einmal:** Das Gateway merkt sich je Quelle, bis wohin es gelesen hat, und übergibt jede
+  Nachricht einmal, egal wie alt sie beim Abruf ist. Nach einem Ausfall wird also nachgeholt, was in der Zwischenzeit kam.
+- **Höchstalter (optional):** Bei einer Quelle lässt sich ein Höchstalter in Minuten einstellen. Ältere Nachrichten
+  werden dann nur als „veraltet" protokolliert. Sinnvoll für Quellen, die Alarme auslösen.
+- **Zurücksetzen:** Administratoren können den Lesestand einer Quelle zurücksetzen, entweder „ab jetzt neu" oder
+  „erneut lesen ab" einem Zeitpunkt, etwa um den Ablauf mit einer vorhandenen Nachricht noch einmal zu testen.
 - **Postfächer bleiben unverändert:** Mails werden nur gelesen, nicht markiert, verschoben oder gelöscht.
 - **Ein Prozess:** Der Dienst darf nicht mehrfach parallel laufen, sonst wird doppelt abgefragt.
 
@@ -340,7 +345,6 @@ In `/etc/divera-gateway.env` (Proxmox) bzw. `.env` (Docker):
 | `SECRET_KEY` | wird erzeugt | verschlüsselt gespeicherte Zugangsdaten |
 | `COOKIE_SECURE` | `false` (Proxmox), `true` (Docker) | Anmeldung nur über HTTPS |
 | `TZ` | `Europe/Berlin` | Zeitzone der Anzeige |
-| `MAX_AGE_MINUTES` | `15` | ältere Nachrichten lösen nichts aus |
 | `LOG_DAYS` | `30` | Aufbewahrung des Protokolls |
 
 ## Bekannte Grenzen

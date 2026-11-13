@@ -153,13 +153,19 @@ with TestClient(app, base_url="http://testserver") as c:
         p = rules.build_payload(rule, rules.match_rule(rule, {"from": "a", "subject": "Alarm", "body": body}))
         assert p == {"title": "B2 Wohnungsbrand", "text": "Alarm von a", "address": "Musterstraße 1, Musterstadt",
                      "ric": "LZ1", "priority": "1", "group_ids": ["1", "2"]}, p
-        # doppelte Nachricht wird nur einmal verarbeitet, veraltete gar nicht
+        # doppelte Nachricht wird nur einmal verarbeitet; das Alter spielt nur eine Rolle, wenn die Quelle ein Höchstalter hat
         import datetime as dt
-        webhook_src = db.get(m.Source, 2)
+        mail_src = db.get(m.Source, 1)
         assert worker.already_processed(db, 2, "abc") is False and worker.already_processed(db, 2, "abc") is True
-        old = {"id": "o", "from": "a", "subject": "Alarm", "body": body, "ts": dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=2)}
-        assert worker.handle_message(db, webhook_src, old) == 0
-    assert "veraltet" in c.get("/logs?status=veraltet").text
+        old = {"id": "o", "from": "a", "subject": "Alarm uralt", "body": body, "ts": dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=3)}
+        assert worker.handle_message(db, mail_src, old) == 1, "ohne Höchstalter wird auch eine drei Tage alte Nachricht übergeben"
+        mail_src.config = dict(mail_src.config, max_age=15); db.commit()
+        assert worker.handle_message(db, mail_src, dict(old, subject="Alarm zu alt")) == 0
+        fresh = dict(old, subject="Alarm frisch", ts=dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=5))
+        assert worker.handle_message(db, mail_src, fresh) == 1
+        mail_src.config = dict(mail_src.config, max_age=0); db.commit()
+    stale = c.get("/logs?status=veraltet").text
+    assert "Alarm zu alt" in stale and "Höchstalter von 15 Minuten" in stale and "Alarm uralt" not in stale and "Alarm uralt" in c.get("/logs").text
 
     nokind = c.post("/rules/preview", data={k: v for k, v in dict(RULE, t_subject="Alarm", t_body=body).items() if k != "kind"}).json()  # ohne Angabe der Art
     assert nokind["kind"] == "news" and nokind["payload"]["news"] == "1"
@@ -807,6 +813,85 @@ with TestClient(app, base_url="http://testserver") as c:
     assert boom.status_code == 500 and "Systemprotokoll" in boom.text
     last_sys = sysrows(category="System")[-1]
     assert last_sys[0] == "fehler" and "Unerwarteter Fehler bei GET /tenants/1" in last_sys[2] and "absichtlicher Testfehler" in last_sys[3] and last_sys[4] == "neu3"
+
+    # ---------- Lesestand: genau einmal übergeben, Zurücksetzen ----------
+    def gm(key, received):
+        return {"id": "g" + key, "internetMessageId": key, "subject": "S" + key, "from": {"emailAddress": {"address": "a@b.de"}},
+                "body": {"content": "T"}, "receivedDateTime": received}
+    inbox = []
+    keep_graph, keep_token = sources._graph_messages, sources._graph_token
+    sources._graph_token = lambda cfg: "tok"
+    sources._graph_messages = lambda cfg, params, limit=50: [x for x in inbox if x["receivedDateTime"] >= params["$filter"].split(" ge ")[1]]
+    msgs0, st = sources.poll_m365({}, {})
+    assert msgs0 == [] and st["seen"] == [] and st["since"].endswith("Z"), "erster Lauf merkt nur den Startpunkt"
+    st = {"since": "2026-11-01T10:00:00Z", "seen": []}
+    inbox[:] = [gm("A", "2026-11-01T10:00:05Z"), gm("B", "2026-11-01T10:00:09Z"), gm("C", "2026-11-01T10:00:09Z")]
+    got, st = sources.poll_m365({}, st)
+    assert [x["id"] for x in got] == ["A", "B", "C"] and st == {"since": "2026-11-01T10:00:09Z", "seen": ["B", "C"]}
+    got, st2 = sources.poll_m365({}, st)
+    assert got == [] and st2 == st, "ohne neue Mail wird nichts erneut geliefert, auch nach Wochen nicht"
+    inbox.append(gm("D", "2026-11-01T10:00:09Z")); inbox.append(gm("E", "2026-11-20T08:00:00Z"))
+    got, st = sources.poll_m365({}, st)
+    assert [x["id"] for x in got] == ["D", "E"] and st == {"since": "2026-11-20T08:00:00Z", "seen": ["E"]}
+    got, st = sources.poll_m365({}, {"since": "2026-11-01T10:00:09Z"})   # Stand aus einer älteren Version ohne "seen"
+    assert [x["id"] for x in got] == ["E"] and st["seen"] == ["E"], "beim Umstieg wird die zuletzt gelesene Nachricht nicht noch einmal übergeben"
+    got, _ = sources.poll_m365({}, {"since": "2026-11-01T10:00:00Z", "seen": []})   # nach einem Zurücksetzen
+    assert [x["id"] for x in got] == ["A", "B", "C", "D", "E"]
+    sources._graph_messages, sources._graph_token = keep_graph, keep_token
+
+    class FakeImap:
+        mails = {1: "Sat, 31 Oct 2026 08:00:00 +0000", 2: "Sun, 01 Nov 2026 09:00:00 +0000", 3: "Sun, 01 Nov 2026 12:00:00 +0000", 4: "Mon, 02 Nov 2026 07:00:00 +0000"}
+        def response(self, name): return ("OK", [b"77"])
+        def uid(self, cmd, *args):
+            if cmd == "search":
+                crit = args[1]
+                if crit == "ALL": picked = sorted(self.mails)
+                elif crit.startswith("SINCE"): FakeImap.asked = crit; picked = [u for u in sorted(self.mails) if u >= 1]
+                else: low = int(crit.split()[1].split(":")[0]); picked = [u for u in sorted(self.mails) if u >= low] or [max(self.mails)]
+                return "OK", [" ".join(str(u) for u in picked).encode()]
+            raw = f"From: x@y.de\r\nSubject: M{args[0]}\r\nDate: {self.mails[int(args[0])]}\r\n\r\nText".encode()
+            return "OK", [(b"x", raw), b")"]
+        def logout(self): pass
+    keep_conn, sources._imap_connect = sources._imap_connect, lambda cfg: FakeImap()
+    got, ist = sources.poll_imap({}, {})
+    assert got == [] and ist == {"uidvalidity": "77", "last_uid": 4}
+    got, ist = sources.poll_imap({}, {"rewind": "2026-11-01T10:00:00Z"})
+    assert [x["subject"] for x in got] == ["M3", "M4"] and ist == {"uidvalidity": "77", "last_uid": 4} and FakeImap.asked == "SINCE 31-Oct-2026"
+    FakeImap.mails[5] = "Mon, 02 Nov 2026 08:00:00 +0000"
+    got, ist = sources.poll_imap({}, ist)
+    assert [x["subject"] for x in got] == ["M5"] and ist["last_uid"] == 5 and sources.poll_imap({}, ist)[0] == []
+    sources._imap_connect = keep_conn
+
+    resetpage = c.get("/sources/1/reset").text
+    assert "Lesestand zurücksetzen: Leitstelle" in resetpage and "Testmodus" in resetpage and 'type="datetime-local"' in resetpage
+    assert "Zurücksetzen</a>" in c.get("/tenants/1").text and "Zurücksetzen</a>" not in e.get("/tenants/1").text
+    assert e.get("/sources/1/reset").status_code == 403 and e.post("/sources/1/reset", data={"csrf": et, "mode": "now"}).status_code == 403, "nur für Administratoren"
+    assert c.get("/sources/2/reset").status_code == 400, "Webhooks haben keinen Lesestand"
+    assert "Datum und Uhrzeit wählen" in c.post("/sources/1/reset", data={"csrf": tok, "mode": "since", "since": ""}).text
+    assert "in der Vergangenheit" in c.post("/sources/1/reset", data={"csrf": tok, "mode": "since", "since": "2099-01-01T10:00"}).text
+    with m.SessionLocal() as db:
+        db.add(m.Processed(source_id=1, key="alt-1")); db.add(m.Processed(source_id=2, key="webhook-bleibt")); db.commit()
+    rr = c.post("/sources/1/reset", data={"csrf": tok, "mode": "since", "since": "2026-11-01T11:00"})
+    assert "liest Nachrichten ab 01.11.2026 11:00 erneut" in rr.text
+    with m.SessionLocal() as db:
+        s1 = db.get(m.Source, 1)
+        assert json.loads(s1.state) == {"since": "2026-11-01T10:00:00Z", "seen": []} and s1.last_poll is None, s1.state   # 11:00 Berlin = 10:00 UTC
+        assert db.query(m.Processed).filter_by(source_id=1).count() == 0 and db.query(m.Processed).filter_by(source_id=2).count() >= 1
+    assert sysrows(category="Quelle")[-1][:3] == ("warnung", "Quelle", "Lesestand von „Leitstelle“ zurückgesetzt: liest Nachrichten ab 01.11.2026 11:00 erneut")
+    # zurückgesetzt und abgerufen: die schon einmal übergebene Nachricht läuft noch einmal durch die Regeln
+    sources.POLLERS["m365"] = lambda cfg, state: ([{"id": "m-1", "from": "ls@x.de", "subject": "Alarm nochmal", "body": body, "date": "",
+                                                    "ts": dt.datetime(2026, 11, 1, 10, 30, tzinfo=dt.timezone.utc)}], {"since": "x", "seen": ["m-1"]})
+    assert worker.run_source(1)["new"] == 1 and worker.run_source(1)["new"] == 0 and "Alarm nochmal" in c.get("/logs").text
+    assert "beginnt ab jetzt neu" in c.post("/sources/1/reset", data={"csrf": tok, "mode": "now"}).text
+    with m.SessionLocal() as db:
+        assert db.get(m.Source, 1).state == "{}"
+    # Höchstalter je Quelle im Formular
+    assert 'name="max_age"' in c.get("/sources/1/edit").text
+    c.post("/sources/save", data={"csrf": tok, "id": "1", "name": "Leitstelle", "directory_id": "dir-1", "client_id": "cid", "mailbox": "a@b.de",
+                                  "folder": "inbox", "active": "on", "max_age": "30"})
+    with m.SessionLocal() as db:
+        assert db.get(m.Source, 1).config["max_age"] == 30 and db.get(m.Source, 1).config["client_secret"] == "s3cret"
+    assert 'name="max_age" min="0" max="100000" value="30"' in c.get("/sources/1/edit").text
 
     # Rechte wirken sofort, auch in laufenden Sitzungen
     c.post("/users/save", data=dict(VIEW, id=str(leser_id), p_rules="0", tenant=["2"]))

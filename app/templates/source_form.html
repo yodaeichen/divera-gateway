@@ -33,6 +33,8 @@
 
   {% if stype != 'webhook' %}
   <label>Abfrageintervall in Sekunden</label><input type="number" name="poll_interval" min="10" max="3600" value="{{ source.poll_interval if source else 30 }}">
+  <label>Höchstalter in Minuten (optional)</label><input type="number" name="max_age" min="0" max="100000" value="{{ cfg.max_age or '' }}" placeholder="kein Höchstalter">
+  <p class="hint">Leer oder 0: Jede Nachricht wird genau einmal übergeben, egal wie alt sie beim Abruf ist. Mit einem Wert bleiben ältere Nachrichten liegen und erscheinen im Protokoll als „veraltet". Das ist nur sinnvoll, wenn die Quelle Alarme auslöst und nach einem Ausfall keine alten Einsätze nachalarmiert werden sollen.</p>
   {% endif %}
   <label class="check"><input type="checkbox" name="active" {{ 'checked' if not source or source.active }}> Aktiv</label>
   <div class="actions"><button>Speichern</button><a class="btn light" href="/tenants/{{ tenant.id }}">Abbrechen</a></div>

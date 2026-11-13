@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -258,7 +258,7 @@ async def logout(request: Request, db: Session = Depends(get_db)):
 
 ONLINE_MINUTES = 15
 STATUS_LABELS = [("gesendet", "Erfolgreich an DIVERA gesendet"), ("fehler", "Fehlgeschlagen"), ("test", "Nur Testmodus (nicht gesendet)"),
-                 ("ignoriert", "Keine Regel hat gepasst"), ("veraltet", "Zu alt, nicht übergeben")]
+                 ("ignoriert", "Keine Regel hat gepasst"), ("veraltet", "Älter als das eingestellte Höchstalter")]
 
 
 def admin_overview(db: Session, now: dt.datetime) -> dict:
@@ -665,6 +665,8 @@ async def source_save(request: Request, db: Session = Depends(get_db), user: m.U
                      "webhook": ((), None)}[source.type]
     for key in plain:
         cfg[key] = text(form, "directory_id" if key == "tenant_id" else key)
+    if source.type != "webhook":
+        cfg["max_age"] = int(form.get("max_age")) if str(form.get("max_age", "")).isdigit() else 0
     if secret and str(form.get(secret, "")):
         cfg[secret] = str(form[secret])
     source.config = cfg
@@ -722,6 +724,46 @@ async def source_process(sid: int, request: Request, db: Session = Depends(get_d
     else:
         flash(request, f"„{msg['subject'][:80]}“ verarbeitet, aber keine Regel passt. Öffne die Regel und prüfe sie mit dieser Nachricht in der Live-Ansicht.", "err")
     return go(f"/logs?tenant={source.tenant_id}")
+
+
+@app.get("/sources/{sid}/reset")
+def source_reset_form(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("sources:2", "users:2"))):
+    source = source_for(db, user, sid)
+    if source.type not in sources.POLLERS:
+        raise HTTPException(400, "Für diese Quelle nicht möglich")
+    suggestion = (dt.datetime.now(TZ) - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
+    remembered = db.scalar(select(func.count(m.Processed.id)).where(m.Processed.source_id == sid))
+    return page(request, "source_reset.html", user, tenant=source.tenant, source=source, suggestion=suggestion, remembered=remembered,
+                per_poll=sources.MAX_PER_POLL)
+
+
+@app.post("/sources/{sid}/reset")
+async def source_reset(sid: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("sources:2", "users:2"))):
+    """Setzt den Lesestand einer Quelle zurück: entweder neu ab jetzt oder ab einem gewählten Zeitpunkt erneut lesen."""
+    form = await read_form(request)
+    source = source_for(db, user, sid)
+    if source.type not in sources.POLLERS:
+        raise HTTPException(400, "Für diese Quelle nicht möglich")
+    if form.get("mode") == "since":
+        try:
+            start = dt.datetime.fromisoformat(str(form.get("since", ""))).replace(tzinfo=TZ)
+        except ValueError:
+            flash(request, "Bitte Datum und Uhrzeit wählen, ab denen erneut gelesen werden soll.", "err")
+            return go(f"/sources/{sid}/reset")
+        if start > dt.datetime.now(TZ):
+            flash(request, "Der Zeitpunkt muss in der Vergangenheit liegen.", "err")
+            return go(f"/sources/{sid}/reset")
+        stamp = start.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        source.state = json.dumps({"since": stamp, "seen": []} if source.type == "m365" else {"rewind": stamp})
+        what = f"liest Nachrichten ab {start.strftime('%d.%m.%Y %H:%M')} erneut"
+    else:
+        source.state, what = "{}", "beginnt ab jetzt neu"
+    db.execute(delete(m.Processed).where(m.Processed.source_id == sid))
+    source.last_poll, source.last_error = None, ""  # sofort abfragen
+    syslog.note(db, "warnung", "Quelle", f"Lesestand von „{source.name}“ zurückgesetzt: {what}", tenant=source.tenant, actor=user.username)
+    db.commit()
+    flash(request, f"Zurückgesetzt: „{source.name}“ {what}. Der nächste Abruf läuft in wenigen Sekunden; das Ergebnis steht im Protokoll.")
+    return go(f"/tenants/{source.tenant_id}")
 
 
 @app.post("/sources/{sid}/token")
