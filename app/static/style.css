@@ -126,3 +126,38 @@ footer { padding-bottom:env(safe-area-inset-bottom); }
   .login { margin:32px auto; }
 }
 @media (max-width:420px) { .tiles { grid-template-columns:1fr; } }
+
+/* ---------- Erscheinungsbild ab dem neuen Logo: Feuerfarben, Flammen und Atemschutzträger als Seitenfuß ---------- */
+:root { --bg:#f7f4f0; --ink:#16181d; --muted:#6a645d; --line:#e5ded4; --accent:#16181d; --feuer:#ee7d22; --glut:#9a3d0a; --alarm:#c8102e; }
+html { background:var(--ink); }
+body { min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; background:var(--bg); }
+main { flex:1 0 auto; width:100%; }
+a { color:var(--glut); }
+header { background:var(--ink); border-bottom:4px solid var(--feuer); }
+header a.brand { display:flex; flex-direction:row; align-items:center; gap:10px; } header a.brand > span.name { display:block; color:#fff; }
+header a.brand > span.name > span { color:#ffa54a; } header a.brand img { border-radius:7px; flex:none; }
+header nav a:hover, header nav a:focus-visible { color:#ffa54a; }
+header a.sponsor:hover { border-color:#ffa54a; }
+button:not([class]):hover, .btn:not(.light):not(.klein):hover { background:#2b2f37; } .btn.light:hover, button.light:hover { background:#e9e4dc; } button.link:hover { text-decoration:underline; }
+.btn.light, button.light { background:#f1ede7; border-color:var(--line); }
+.loginbrand { text-align:center; } .loginbrand img { display:block; margin:0 auto 12px; border-radius:20px; box-shadow:0 6px 18px rgba(154,61,10,.28); }
+.loginbrand span { color:var(--glut); }
+.login { margin-top:56px; border-top:4px solid var(--feuer); }
+.card { box-shadow:0 1px 2px rgba(22,24,29,.04); }
+.tile:hover { border-color:var(--feuer); } .tile.alarm { border-left:4px solid var(--alarm); }
+code { background:#f1ede7; } th { color:var(--muted); }
+footer.fuss { position:relative; max-width:none; width:100%; margin:56px 0 0; padding:0; overflow:hidden; text-align:left; flex:none;
+  min-height:230px; display:flex; flex-direction:column; justify-content:flex-end;
+  background:url(/static/img/feuer.webp) center top / max(100%, 1100px) auto no-repeat; }
+footer.fuss .fuss-figur { position:absolute; right:max(4%, calc(50% - 600px)); bottom:-128px; height:400px; width:auto; opacity:.5; pointer-events:none; user-select:none; }
+footer.fuss .fuss-zeile { position:relative; background:rgba(22,24,29,.93); color:#d9dde4; font-size:13px; text-align:center;
+  padding:11px 20px calc(11px + env(safe-area-inset-bottom)); }
+footer.fuss .fuss-zeile a { color:#fff; } footer.fuss .fuss-zeile a:hover { color:#ffa54a; }
+@media (max-width:760px) {
+  footer.fuss { min-height:170px; margin-top:36px; } footer.fuss .fuss-figur { height:250px; bottom:-74px; right:-12px; }
+  header a.brand img { width:26px; height:26px; }
+}
+@media print { footer.fuss { display:none; } body { display:block; background:#fff; } }
+.live .msg { border-left-color:var(--alarm); } .live .msg.news { border-left-color:#0b5cad; }
+.tabs a { background:#f1ede7; } .tabs a.on { background:#fff; border-top:3px solid var(--feuer); }
+.stat.ok strong { color:var(--ok); }

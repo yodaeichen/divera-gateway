@@ -2,6 +2,16 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 2.4.0
+
+- **Neues Logo:** App-Symbol mit Feuerhintergrund, Atemschutzträger und dem Kürzel „DG"; es erscheint auf dem
+  Startbildschirm, im Browser-Tab, in der Kopfzeile und auf der Anmeldeseite
+- **Neues Erscheinungsbild:** Flammen und Atemschutzträger als Seitenfuß auf jeder Seite, dazu passende Farben
+  (dunkle Kopfzeile mit orangefarbener Linie, warmer heller Grund, dunkle Schaltflächen, Links in Glutorange).
+  Alarmrot bleibt den Alarmen vorbehalten
+- Kurze Seiten füllen jetzt das ganze Fenster, der Seitenfuß steht immer unten
+- Wer die App schon installiert hat, bekommt das neue Symbol je nach Gerät erst nach erneutem Installieren
+
 ## 2.3.0
 
 - **Als App auf Handy und Tablet:** Das Gateway lässt sich auf Android, iPhone, iPad und am Rechner installieren

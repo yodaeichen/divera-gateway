@@ -53,6 +53,13 @@ Voraussetzungen und Grenzen:
 - Die Push-Meldungen ersetzen nicht die DIVERA-App: Sie gehen nur an den jeweiligen Gateway-Benutzer und melden
   Störungen des Gateways.
 
+## Logo und Erscheinungsbild
+
+Das App-Symbol liegt in `app/static/icons/`, die Bilder des Seitenfußes (Flammen `feuer.webp`, Atemschutzträger
+`atemschutz.svg`) in `app/static/img/`. Wer das Projekt für die eigene Wehr anpasst, tauscht diese Dateien aus;
+die Farben stehen am Ende von `app/static/style.css` unter „Erscheinungsbild". Die Vorlagen für Flammen und
+Zeichnung stammen von der Löschgruppe Eichen.
+
 ## Funktionen
 
 - **Quellen:** Microsoft-365-Postfächer (Microsoft Graph, auch Unterordner), IMAP-Postfächer, eingehende Webhooks

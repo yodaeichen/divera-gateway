@@ -875,6 +875,11 @@ with TestClient(app, base_url="http://testserver") as c:
     loginpage = anon.get("/login").text
     assert 'rel="manifest" href="/manifest.webmanifest"' in loginpage and "/static/pwa.js" in loginpage and "apple-touch-icon" in loginpage
     assert "<script>" not in loginpage, "Skripte nur aus Dateien, sonst sperrt sie die Content-Security-Policy"
+    # Logo und Seitenfuß mit Flammen und Atemschutzträger
+    assert 'class="loginbrand"><img src="/static/icons/icon-192.png"' in loginpage and '<footer class="fuss">' in loginpage and "fuss-figur" in loginpage
+    for bild, kopf in (("img/feuer.webp", b"RIFF"), ("img/atemschutz.svg", b"<svg"), ("icons/logo-96.png", b"\x89PNG")):
+        assert open(os.path.join(static, bild), "rb").read(4) == kopf and anon.get(f"/static/{bild}").status_code == 200, bild
+    assert "url(/static/img/feuer.webp)" in anon.get("/static/style.css").text and "/static/icons/logo-96.png" in c.get("/").text
     acc = e.get("/account").text
     public = re.search(r'id="push-card" data-key="([\w-]+)"', acc).group(1)
     assert len(push.unb64(public)) == 65 and public == re.search(r'data-key="([\w-]+)"', c.get("/account").text).group(1), "ein Schlüssel für alle"
