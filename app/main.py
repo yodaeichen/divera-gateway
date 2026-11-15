@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as m
-from . import access, backup, events, mailer, notify, rules, sources, suggest, syslog, worker
+from . import access, backup, events, mailer, notify, push, rules, sources, suggest, syslog, worker
 from . import security as sec
 from .version import VERSION
 
@@ -1437,7 +1437,7 @@ async def users_delete(uid: int, request: Request, db: Session = Depends(get_db)
 @app.get("/account")
 def account_view(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
     return page(request, "account.html", user, role=access.role_of(user), options=notify.available(user), picked=notify.chosen(user),
-                mail_ready=mailer.configured(mailer.load(db)))
+                mail_ready=mailer.configured(mailer.load(db)), push_key=push.public_key(db), devices=push.devices_of(db, user.id))
 
 
 @app.post("/account/notify")
@@ -1450,14 +1450,17 @@ async def account_notify(request: Request, db: Session = Depends(get_db), user: 
         return go("/account")
     allowed_keys = {option[0] for option in notify.available(user)}
     picked = [key for key in form.getlist("notify") if key in allowed_keys]
-    if picked and not address:
-        flash(request, "Für Benachrichtigungen bitte eine E-Mail-Adresse eintragen.", "err")
+    if picked and not address and not push.devices_of(db, user.id):
+        flash(request, "Für Benachrichtigungen bitte eine E-Mail-Adresse eintragen oder Push-Meldungen auf einem Gerät einschalten.", "err")
         return go("/account")
     user.email, user.notify = address, json.dumps(picked)
     db.add(user)
     syslog.note(db, "info", "Benutzer", f"{user.username} hat die eigenen Benachrichtigungen geändert",
                 ", ".join(picked) or "keine", actor=user.username)
     db.commit()
+    if "send_test" in form and not address:
+        flash(request, "Gespeichert. Für die Probenachricht per E-Mail fehlt die Adresse; die Probemeldung für Push steht weiter unten.", "err")
+        return go("/account")
     if "send_test" in form:
         settings = mailer.load(db)
         try:
@@ -1484,6 +1487,92 @@ async def account_save(request: Request, db: Session = Depends(get_db), user: m.
         syslog.note(db, "info", "Benutzer", f"{user.username} hat das eigene Passwort geändert", actor=user.username)
         db.commit()
         flash(request, "Passwort geändert.")
+    return go("/account")
+
+
+# ---------- Als App: Manifest, Service Worker, Push-Meldungen ----------
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    return FileResponse(os.path.join(BASE, "static", "manifest.webmanifest"), media_type="application/manifest+json",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/sw.js")
+def service_worker():
+    """Der Service Worker muss an der Wurzel liegen, damit er für alle Seiten gilt. Die Versionsnummer erneuert seinen Zwischenspeicher."""
+    with open(os.path.join(BASE, "static", "sw.js"), encoding="utf-8") as handle:
+        script = handle.read().replace("__VERSION__", VERSION)
+    return Response(script, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/offline")
+def offline(request: Request):
+    return templates.TemplateResponse(request, "offline.html", {})
+
+
+def push_device(db: Session, user: m.User, form) -> m.PushDevice | None:
+    """Das Gerät zur übergebenen Adresse, aber nur wenn es dem angemeldeten Benutzer gehört."""
+    device = db.scalar(select(m.PushDevice).where(m.PushDevice.endpoint_hash == push.endpoint_hash(text(form, "endpoint", 1000))))
+    return device if device is not None and device.user_id == user.id else None
+
+
+@app.post("/push/subscribe")
+async def push_subscribe(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    form = await read_form(request)
+    known = push_device(db, user, form) is not None
+    try:
+        device = push.register(db, user, text(form, "endpoint", 1000), text(form, "p256dh", 120), text(form, "auth", 40),
+                               request.headers.get("user-agent", ""))
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    if not known:
+        syslog.record("info", "Benutzer", f"{user.username} hat Push-Meldungen auf einem Gerät eingeschaltet", device.label, actor=user.username)
+    return {"ok": True}
+
+
+@app.post("/push/unsubscribe")
+async def push_unsubscribe(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    device = push_device(db, user, await read_form(request))
+    if device is not None:
+        syslog.note(db, "info", "Benutzer", f"{user.username} hat Push-Meldungen auf einem Gerät ausgeschaltet", device.label, actor=user.username)
+        db.delete(device)
+        db.commit()
+    return {"ok": True}
+
+
+@app.post("/push/test")
+async def push_test(request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    device = push_device(db, user, await read_form(request))
+    if device is None:
+        return JSONResponse({"detail": "Dieses Gerät ist dem Gateway nicht bekannt. Bitte Push aus- und wieder einschalten."}, status_code=404)
+    payload = {"title": "DIVERA Gateway: Probemeldung", "body": "So sehen Push-Meldungen des Gateways aus. Die Zustellung auf dieses Gerät funktioniert.",
+               "url": "/account", "tag": "probe"}
+    try:
+        status = await asyncio.to_thread(push.send, push.server_key(db), push.contact(db), device, payload)
+    except Exception as exc:
+        return JSONResponse({"detail": f"Der Push-Dienst ist nicht erreichbar ({type(exc).__name__}). Der Server braucht ausgehendes HTTPS ins Internet."}, status_code=502)
+    if status in push.GONE:
+        db.delete(device)
+        db.commit()
+        return JSONResponse({"detail": "Der Push-Dienst kennt dieses Gerät nicht mehr. Bitte Push aus- und wieder einschalten."}, status_code=410)
+    if not 200 <= status < 300:
+        return JSONResponse({"detail": f"Der Push-Dienst hat die Meldung abgelehnt (HTTP {status})."}, status_code=502)
+    device.last_ok = m.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/push/devices/{did}/delete")
+async def push_device_delete(did: int, request: Request, db: Session = Depends(get_db), user: m.User = Depends(current_user)):
+    await read_form(request)
+    device = db.get(m.PushDevice, did)
+    if device is None or device.user_id != user.id:
+        raise HTTPException(404, "Nicht gefunden")
+    syslog.note(db, "info", "Benutzer", f"{user.username} hat ein Gerät für Push-Meldungen entfernt", device.label, actor=user.username)
+    db.delete(device)
+    db.commit()
+    flash(request, "Gerät entfernt. Es bekommt keine Push-Meldungen mehr.")
     return go("/account")
 
 

@@ -2,6 +2,18 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 2.3.0
+
+- **Als App auf Handy und Tablet:** Das Gateway lässt sich auf Android, iPhone, iPad und am Rechner installieren
+  (eigenes Symbol, eigenes Fenster, ohne App Store). Die Anleitung für das jeweilige Gerät steht unter „Mein Konto"
+- **Push-Meldungen:** Je Gerät unter „Mein Konto" einschaltbar, mit Probemeldung und Liste der eigenen Geräte.
+  Gemeldet wird dasselbe wie per E-Mail (fehlgeschlagene Übergabe, Störung eines Postfachs, Fehler des Gateways);
+  eine E-Mail-Adresse ist dafür nicht mehr nötig
+- Oberfläche für das Handy überarbeitet: Menü als Leiste zum Wischen, größere Schaltflächen und Eingabefelder,
+  breite Tabellen lassen sich seitlich schieben
+- Hinweisseite „Gateway nicht erreichbar", wenn die App den Server nicht erreicht (z. B. VPN nicht verbunden)
+- Neue Tabelle `push_devices`; sie entsteht beim ersten Start von selbst. Keine neue Abhängigkeit
+
 ## 2.2.0
 
 - Neue Startseite, die sich nach den Rechten des Benutzers richtet: Kacheln für das, was er tun darf, Zustand seiner

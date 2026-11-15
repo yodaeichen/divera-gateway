@@ -1,10 +1,10 @@
-"""Benachrichtigungen per E-Mail: jeder Benutzer wählt unter „Mein Konto“, worüber er informiert werden will."""
+"""Benachrichtigungen per E-Mail und Push: jeder Benutzer wählt unter „Mein Konto“, worüber er informiert werden will."""
 import json
 import logging
 
 from sqlalchemy import func, select
 
-from . import access, mailer, syslog
+from . import access, mailer, push, syslog
 from . import db as m
 from . import security as sec
 
@@ -76,9 +76,10 @@ def collect(db) -> dict[int, list[str]]:
     result: dict[int, list[str]] = {}
     if not failed and not events:
         return result
+    with_push = set(db.scalars(select(m.PushDevice.user_id)))
     for user in db.scalars(select(m.User)):
         wants = chosen(user)
-        if not wants or not mailer.valid_address(user.email):
+        if not wants or not (mailer.valid_address(user.email) or user.id in with_push):
             continue
         lines = []
         if "transfer" in wants:
@@ -107,22 +108,44 @@ def message(lines: list[str], base_url: str) -> tuple[str, str]:
     return subject, body
 
 
+def push_message(lines: list[str]) -> dict:
+    """Kurzfassung für die Push-Meldung: bei einem Ereignis dessen Text, sonst die Zahl und die ersten drei."""
+    short = [line.split("\n")[0].split("  ", 1)[-1].strip() for line in lines]
+    count = len(short)
+    if count == 1:
+        detail = lines[0].split("\n", 1)[1].strip().replace("\n    ", " · ") if "\n" in lines[0] else ""
+        return {"title": "DIVERA Gateway", "body": (short[0] + ("\n" + detail if detail else ""))[:400], "url": "/logs"}
+    more = f"\n… und {count - 3} weitere" if count > 3 else ""
+    return {"title": f"DIVERA Gateway: {count} Meldungen", "body": ("\n".join(s[:120] for s in short[:3]) + more)[:500], "url": "/logs"}
+
+
 def run() -> int:
-    """Ein Durchlauf: neue Ereignisse einsammeln und je Benutzer eine Nachricht verschicken. Gibt die Zahl der Nachrichten zurück."""
+    """Ein Durchlauf: neue Ereignisse einsammeln und je Benutzer eine E-Mail und eine Push-Meldung verschicken.
+
+    Gibt die Zahl der verschickten E-Mails zurück.
+    """
     sent = 0
     with m.SessionLocal() as db:
         pending = collect(db)
         if not pending:
             return 0
         settings = mailer.load(db)
-        if not mailer.configured(settings):
-            return 0
         base = (settings.get("base_url") or "").rstrip("/")
         base = base + "/" if base else ""
         targets = {u.id: (u.username, u.email) for u in db.scalars(select(m.User).where(m.User.id.in_(pending)))}
+        try:
+            _, push_problems = push.deliver(db, pending.keys(), lambda uid: push_message(pending[uid]))
+        except Exception as exc:
+            push_problems = [f"{type(exc).__name__}: {exc}"]
+    if push_problems:
+        syslog.record("warnung", "Benachrichtigung", "Push-Meldung konnte nicht zugestellt werden", " | ".join(push_problems)[:1500])
+    if not mailer.configured(settings):
+        return 0
     problems = []
     for uid, lines in pending.items():
         name, address = targets[uid]
+        if not mailer.valid_address(address):
+            continue
         try:
             mailer.deliver(settings, address, *message(lines, base))
             sent += 1

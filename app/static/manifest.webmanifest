@@ -1,0 +1,22 @@
+{
+  "name": "DIVERA Gateway",
+  "short_name": "Gateway",
+  "description": "E-Mails und Webhooks regelbasiert an DIVERA 24/7 übergeben",
+  "lang": "de",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#1c2430",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Protokoll", "url": "/logs" },
+    { "name": "Mitteilungen", "url": "/news" },
+    { "name": "Löschgruppen", "url": "/tenants" }
+  ]
+}

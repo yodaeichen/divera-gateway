@@ -851,6 +851,145 @@ with TestClient(app, base_url="http://testserver") as c:
     finally:
         mailer.deliver = keep_deliver
 
+    # ---------- Als App: Manifest, Service Worker, Push-Meldungen ----------
+    import base64, struct
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from app import push
+    static = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "static")
+    anon = TestClient(app, base_url="http://testserver")
+    man = anon.get("/manifest.webmanifest")
+    assert man.status_code == 200 and man.headers["content-type"].startswith("application/manifest+json")
+    assert man.json()["display"] == "standalone" and man.json()["start_url"] == "/" and len(man.json()["icons"]) == 3
+    for icon in man.json()["icons"] + [{"src": "/static/icons/apple-touch-icon.png"}, {"src": "/static/icons/badge-96.png"}]:
+        assert open(os.path.join(static, icon["src"].replace("/static/", "")), "rb").read(8) == b"\x89PNG\r\n\x1a\n", icon
+    assert any(i["purpose"] == "maskable" for i in man.json()["icons"])
+    worker_js = anon.get("/sw.js")
+    assert worker_js.status_code == 200 and "javascript" in worker_js.headers["content-type"] and worker_js.headers["cache-control"] == "no-cache"
+    assert f'VERSION = "{VERSION}"' in worker_js.text and "__VERSION__" not in worker_js.text
+    off = anon.get("/offline")
+    assert off.status_code == 200 and "nicht erreichbar" in off.text and "http://" not in off.text.replace("http://testserver", "")
+    loginpage = anon.get("/login").text
+    assert 'rel="manifest" href="/manifest.webmanifest"' in loginpage and "/static/pwa.js" in loginpage and "apple-touch-icon" in loginpage
+    assert "<script>" not in loginpage, "Skripte nur aus Dateien, sonst sperrt sie die Content-Security-Policy"
+    acc = e.get("/account").text
+    public = re.search(r'id="push-card" data-key="([\w-]+)"', acc).group(1)
+    assert len(push.unb64(public)) == 65 and public == re.search(r'data-key="([\w-]+)"', c.get("/account").text).group(1), "ein Schlüssel für alle"
+    assert "Als App auf dem Handy" in acc and "Deine Geräte mit Push-Meldungen" not in acc
+
+    def raw(key):
+        return key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+
+    def opened(body, key, secret):
+        """Entschlüsselt wie der Browser (RFC 8291), unabhängig von push.encrypt geschrieben."""
+        salt, (size, idlen) = body[:16], struct.unpack("!IB", body[16:21])
+        sender, sealed = body[21:21 + idlen], body[21 + idlen:]
+        shared = key.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), sender))
+        ikm = HKDF(hashes.SHA256(), 32, secret, b"WebPush: info\x00" + raw(key) + sender).derive(shared)
+        cek = HKDF(hashes.SHA256(), 16, salt, b"Content-Encoding: aes128gcm\x00").derive(ikm)
+        nonce = HKDF(hashes.SHA256(), 12, salt, b"Content-Encoding: nonce\x00").derive(ikm)
+        plain = AESGCM(cek).decrypt(nonce, sealed, None)
+        assert size == 4096 and plain.endswith(b"\x02")
+        return json.loads(plain[:-1])
+
+    phone, phone_secret = ec.generate_private_key(ec.SECP256R1()), os.urandom(16)
+    ENDPOINT = "https://fcm.googleapis.com/fcm/send/geheime-adresse-123"
+    SUB = {"csrf": et, "endpoint": ENDPOINT, "p256dh": push.b64(raw(phone)), "auth": push.b64(phone_secret)}
+    assert e.post("/push/subscribe", data=dict(SUB, csrf="falsch")).status_code == 403
+    assert anon.post("/push/subscribe", data=SUB, follow_redirects=False).status_code == 303
+    for bad in ("http://fcm.googleapis.com/x", "https://intern.example/x", "https://fcm.googleapis.com.boese.example/x", "https://127.0.0.1/x"):
+        assert e.post("/push/subscribe", data=dict(SUB, endpoint=bad)).status_code == 400, bad
+    assert e.post("/push/subscribe", data=dict(SUB, auth="kurz")).status_code == 400
+    ua = {"user-agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36"}
+    assert e.post("/push/subscribe", data=SUB, headers=ua).json() == {"ok": True}
+    assert e.post("/push/subscribe", data=SUB, headers=ua).json() == {"ok": True}, "dasselbe Gerät noch einmal: kein zweiter Eintrag"
+    with m.SessionLocal() as db:
+        dev = db.query(m.PushDevice).one()
+        bearb_id = db.query(m.User).filter_by(username="bearb").one().id
+        assert dev.user_id == bearb_id and dev.label == "Android, Chrome" and "geheime-adresse" not in dev.endpoint_enc
+    acc = e.get("/account").text
+    assert "Deine Geräte mit Push-Meldungen" in acc and "Android, Chrome" in acc and "geheime-adresse" not in acc
+    assert "Deine Geräte mit Push-Meldungen" not in c.get("/account").text, "fremde Geräte sieht niemand"
+    assert c.post(f"/push/devices/{dev.id}/delete", data={"csrf": tok}).status_code == 404, "fremdes Gerät lässt sich nicht entfernen"
+    assert c.post("/push/test", data=dict(SUB, csrf=tok)).status_code == 404
+
+    pushed, keep_post, answer = [], push.post, [201]
+    def fake_post(endpoint, headers, body):
+        pushed.append((endpoint, headers, body))
+        return answer[0]
+    push.post = fake_post
+    try:
+        assert e.post("/push/test", data=SUB).json() == {"ok": True}
+        p_endpoint, p_headers, p_body = pushed.pop()
+        assert p_endpoint == ENDPOINT and p_headers["Content-Encoding"] == "aes128gcm" and int(p_headers["TTL"]) > 0
+        p_probe = opened(p_body, phone, phone_secret)
+        assert p_probe["title"] == "DIVERA Gateway: Probemeldung" and p_probe["url"] == "/account"
+        # Ausweis gegenüber dem Push-Dienst: mit dem Schlüssel des Gateways signiert, für genau diesen Dienst ausgestellt
+        token, shown = re.fullmatch(r"vapid t=([\w.-]+), k=([\w-]+)", p_headers["Authorization"]).groups()
+        assert shown == public
+        head, claims, sig = token.split(".")
+        sig = push.unb64(sig)
+        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), push.unb64(shown)).verify(
+            encode_dss_signature(int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:], "big")), f"{head}.{claims}".encode(), ec.ECDSA(hashes.SHA256()))
+        claims = json.loads(push.unb64(claims))
+        assert claims["aud"] == "https://fcm.googleapis.com" and claims["sub"].startswith(("mailto:", "https://")) and claims["exp"] > dt.datetime.now().timestamp()
+
+        # Ereignisse kommen als Push an, auch ohne E-Mail-Adresse und ohne eingerichteten E-Mail-Versand
+        assert "gespeichert" in e.post("/account/notify", data={"csrf": et, "email": "", "notify": ["transfer", "source"]}).text, "mit Push geht es ohne Adresse"
+        notify.run(); pushed.clear()
+        with m.SessionLocal() as db:
+            t1 = db.get(m.Tenant, 1)
+            db.add(m.Log(tenant_id=1, tenant_name=t1.name, subject="Sperrung B9", status="fehler", detail="HTTP 403: abgelehnt"))
+            db.add(m.Log(tenant_id=2, tenant_name="Andere Wehr", subject="FREMDER-FEHLER", status="fehler", detail="HTTP 500"))
+            db.commit()
+        assert notify.run() == 0 and len(pushed) == 1, "keine E-Mail, eine Push-Meldung"
+        one = opened(pushed.pop()[2], phone, phone_secret)
+        assert one["title"] == "DIVERA Gateway" and "Übergabe an DIVERA fehlgeschlagen" in one["body"] and "Sperrung B9" in one["body"]
+        assert "FREMDER" not in one["body"] and one["url"] == "/logs"
+        with m.SessionLocal() as db:
+            t1 = db.get(m.Tenant, 1)
+            for n in range(5):
+                db.add(m.Log(tenant_id=1, tenant_name=t1.name, subject=f"Fehler {n}", status="fehler", detail="x"))
+            db.commit()
+        notify.run()
+        many = opened(pushed.pop()[2], phone, phone_secret)
+        assert many["title"] == "DIVERA Gateway: 5 Meldungen" and "und 2 weitere" in many["body"] and len(json.dumps(many)) < 1500
+        with m.SessionLocal() as db:
+            assert db.query(m.PushDevice).one().last_ok is not None
+        # Der Push-Dienst lehnt ab: einmal im Systemprotokoll, das Gerät bleibt
+        answer[0] = 500
+        with m.SessionLocal() as db:
+            db.add(m.Log(tenant_id=1, tenant_name="FF Musterstadt", subject="Noch einer", status="fehler", detail="x")); db.commit()
+        notify.run()
+        syspage = c.get("/logs?view=system").text
+        assert "Push-Meldung konnte nicht zugestellt werden" in syspage and "geheime-adresse" not in syspage
+        with m.SessionLocal() as db:
+            assert db.query(m.PushDevice).count() == 1
+        # Das Gerät hat sich abgemeldet (410): der Eintrag verschwindet von selbst
+        answer[0] = 410
+        with m.SessionLocal() as db:
+            db.add(m.Log(tenant_id=1, tenant_name="FF Musterstadt", subject="Letzter", status="fehler", detail="x")); db.commit()
+        notify.run()
+        with m.SessionLocal() as db:
+            assert db.query(m.PushDevice).count() == 0
+        assert "bitte eine E-Mail-Adresse" in e.post("/account/notify", data={"csrf": et, "email": "", "notify": ["transfer"]}).text, "ohne Gerät wieder Pflicht"
+        # Ausschalten und Entfernen
+        answer[0] = 201
+        e.post("/push/subscribe", data=SUB, headers=ua)
+        assert e.post("/push/unsubscribe", data=SUB).json() == {"ok": True}
+        e.post("/push/subscribe", data=SUB, headers=ua)
+        with m.SessionLocal() as db:
+            did = db.query(m.PushDevice).one().id
+        assert "Gerät entfernt" in e.post(f"/push/devices/{did}/delete", data={"csrf": et}).text
+        with m.SessionLocal() as db:
+            assert db.query(m.PushDevice).count() == 0
+        e.post("/account/notify", data={"csrf": et, "email": "bearb@wehr.example", "notify": ["transfer", "source"]})
+    finally:
+        push.post = keep_post
+
     # ---------- Sicherung ----------
     import io, zipfile, sqlite3
     from app import backup

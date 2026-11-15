@@ -13,19 +13,59 @@
   </form>
 </div>
 <div class="card">
-  <h2>Benachrichtigungen per E-Mail</h2>
-  {% if not mail_ready %}<div class="flash err">Der E-Mail-Versand des Gateways ist noch nicht eingerichtet. Bis ein Administrator das unter „Einstellungen" erledigt hat, wird nichts verschickt.</div>{% endif %}
+  <h2>Benachrichtigungen per E-Mail und Push</h2>
+  {% if not mail_ready %}<div class="flash err">Der E-Mail-Versand des Gateways ist noch nicht eingerichtet. Bis ein Administrator das unter „Einstellungen" erledigt hat, wird nichts per E-Mail verschickt. Push-Meldungen gehen unabhängig davon.</div>{% endif %}
   <form method="post" action="/account/notify">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>Deine E-Mail-Adresse</label><input type="text" name="email" value="{{ user.email or '' }}" placeholder="name@example.de" style="max-width:420px">
-    <p class="hint">An diese Adresse gehen die Benachrichtigungen und Links zum Festlegen des Passworts.</p>
+    <p class="hint">An diese Adresse gehen die Benachrichtigungen und Links zum Festlegen des Passworts. Wer nur Push-Meldungen möchte, kann das Feld leer lassen.</p>
     <label>Benachrichtige mich bei</label>
     {% for key, label, hint, admin_only in options %}
     <label class="check"><input type="checkbox" name="notify" value="{{ key }}" {{ 'checked' if key in picked }}> {{ label }}</label>
     <p class="hint">{{ hint }}{% if not admin_only %} Nur für Löschgruppen, die dir freigegeben sind.{% endif %}</p>
     {% endfor %}
-    <p class="hint">Was innerhalb einer Minute anfällt, kommt gesammelt in einer Nachricht.</p>
+    <p class="hint">Was innerhalb einer Minute anfällt, kommt gesammelt in einer Nachricht. Die Auswahl gilt für E-Mail und für Push-Meldungen.</p>
     <div class="actions"><button>Speichern</button><button class="light" name="send_test" value="1">Speichern und Probenachricht senden</button></div>
   </form>
+</div>
+<div class="card" id="push-card" data-key="{{ push_key }}" data-csrf="{{ csrf }}">
+  <h2>Push-Meldungen auf diesem Gerät</h2>
+  <p>Das Gateway meldet sich direkt auf dem Handy oder Rechner, auch wenn die App geschlossen ist. Gemeldet wird, was oben unter „Benachrichtige mich bei" angekreuzt ist.</p>
+  <p class="hint" id="push-status">Wird geprüft …</p>
+  <div class="actions wrap">
+    <button type="button" id="push-on" hidden>Auf diesem Gerät einschalten</button>
+    <button type="button" class="light" id="push-test" hidden>Probemeldung senden</button>
+    <button type="button" class="light" id="push-off" hidden>Auf diesem Gerät ausschalten</button>
+  </div>
+  <noscript><p class="hint">Dafür muss JavaScript eingeschaltet sein.</p></noscript>
+  {% if devices %}
+  <h3>Deine Geräte mit Push-Meldungen</h3>
+  <div class="scroll"><table>
+    <tr><th>Gerät</th><th>Eingeschaltet am</th><th>Zuletzt zugestellt</th><th></th></tr>
+    {% for d in devices %}
+    <tr><td>{{ d.label }}</td><td>{{ d.created|localtime }}</td><td>{{ d.last_ok|localtime if d.last_ok else "noch nichts" }}</td>
+      <td><form class="inline" method="post" action="/push/devices/{{ d.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Entfernen</button></form></td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="hint">Ein Gerät, das sich beim Push-Dienst abgemeldet hat, verschwindet von selbst aus der Liste.</p>
+  {% endif %}
+</div>
+<div class="card" id="app-install">
+  <h2>Als App auf dem Handy</h2>
+  <p id="app-installed" hidden><span class="tag gesendet">Installiert</span> Du benutzt das Gateway gerade als App.</p>
+  <p id="app-insecure" hidden>Die Installation als App geht nur, wenn das Gateway über HTTPS geöffnet ist (Adresse beginnt mit <code>https://</code>).</p>
+  <div id="app-prompt" hidden>
+    <p>Das Gateway lässt sich wie eine App auf diesem Gerät installieren: eigenes Symbol, eigenes Fenster, keine Adresszeile.</p>
+    <div class="actions"><button type="button" id="app-install-button">App installieren</button></div>
+  </div>
+  <div id="app-ios" hidden>
+    <p>So kommt das Gateway auf den Home-Bildschirm von iPhone oder iPad:</p>
+    <ol class="steps"><li>Diese Seite in <strong>Safari</strong> öffnen.</li><li>Unten auf <strong>Teilen</strong> tippen (Quadrat mit Pfeil nach oben).</li><li><strong>Zum Home-Bildschirm</strong> wählen und bestätigen.</li><li>Das Gateway über das neue Symbol öffnen und hier Push-Meldungen einschalten.</li></ol>
+  </div>
+  <div id="app-other" hidden>
+    <p>So kommt das Gateway als App auf dieses Gerät:</p>
+    <ol class="steps"><li><strong>Android (Chrome):</strong> Menü mit den drei Punkten, dann „App installieren" oder „Zum Startbildschirm hinzufügen".</li><li><strong>Rechner (Chrome, Edge):</strong> Symbol „Installieren" rechts in der Adresszeile.</li></ol>
+  </div>
+  <noscript><p class="hint">Im Menü des Browsers „App installieren" oder „Zum Home-Bildschirm" wählen.</p></noscript>
 </div>
 {% endblock %}

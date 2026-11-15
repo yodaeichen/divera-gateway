@@ -16,12 +16,42 @@ Aktuelle Version und Änderungen: siehe [CHANGELOG.md](CHANGELOG.md). Die laufen
 | **Löschgruppen** | Der automatische Betrieb: Quellen (Postfächer, Webhooks) und die Regeln, die daraus Meldungen machen |
 | **Protokoll** | Alles, was übergeben wurde, und das Systemprotokoll |
 
-### Benachrichtigungen per E-Mail
+### Benachrichtigungen per E-Mail und Push
 
-Unter „Mein Konto" wählt jeder Benutzer, worüber ihn das Gateway per E-Mail informiert: fehlgeschlagene Übergaben an
+Unter „Mein Konto" wählt jeder Benutzer, worüber ihn das Gateway per E-Mail oder Push-Meldung informiert: fehlgeschlagene Übergaben an
 DIVERA, Störungen beim Abruf eines Postfachs (und deren Ende) sowie, nur für Administratoren, Fehler des Gateways
 selbst. Berichtet wird nur über Löschgruppen, die dem Benutzer freigegeben sind; was innerhalb einer Minute anfällt,
-kommt gesammelt in einer Nachricht. Voraussetzung ist der eingerichtete E-Mail-Versand unter „Einstellungen".
+kommt gesammelt in einer Nachricht. Für E-Mail ist der eingerichtete E-Mail-Versand unter „Einstellungen" nötig,
+Push-Meldungen gehen unabhängig davon (siehe unten).
+
+### Als App auf Handy und Tablet (ab Version 2.3)
+
+Das Gateway ist eine installierbare Web-App (PWA). Es gibt keine App im App Store oder bei Google Play: Die App wird
+direkt von der eigenen Gateway-Adresse installiert und kommt mit jeder neuen Version von selbst mit.
+
+| Gerät | So geht es |
+|---|---|
+| **Android** (Chrome) | Gateway öffnen, Menü mit den drei Punkten, „App installieren" |
+| **iPhone / iPad** (Safari, ab iOS 16.4) | Gateway öffnen, „Teilen", „Zum Home-Bildschirm" |
+| **Rechner** (Chrome, Edge) | Symbol „Installieren" rechts in der Adresszeile |
+
+Die Anleitung steht auch unter „Mein Konto". Dort lassen sich je Gerät **Push-Meldungen** einschalten: Das Gateway
+meldet sich dann bei fehlgeschlagenen Übergaben, Störungen eines Postfachs und (Administratoren) eigenen Fehlern,
+auch wenn die App geschlossen ist. Auf iPhone und iPad geht das erst, nachdem die App auf dem Home-Bildschirm liegt.
+
+Voraussetzungen und Grenzen:
+
+- **HTTPS mit gültigem Zertifikat** (z. B. über den Nginx Proxy Manager mit Let's Encrypt). Über `http://` oder mit
+  selbst signiertem Zertifikat gibt es weder Installation noch Push.
+- Das Handy muss das Gateway **erreichen** können. Ist die Oberfläche nur aus dem eigenen Netz freigegeben, braucht
+  es WLAN oder VPN; sonst zeigt die App „Gateway nicht erreichbar". Push-Meldungen kommen auch ohne VPN an.
+- Für Push braucht der Server **ausgehendes HTTPS** zu den Push-Diensten der Browser (`fcm.googleapis.com`,
+  `*.push.apple.com`, `*.push.services.mozilla.com`, `*.notify.windows.com`). Der Inhalt wird je Gerät verschlüsselt,
+  die Dienste können ihn nicht lesen.
+- Die App speichert keine Seiten mit Daten auf dem Gerät, nur Stil, Skripte und Symbole. Ohne Verbindung zum
+  Gateway lässt sich nichts ansehen oder senden.
+- Die Push-Meldungen ersetzen nicht die DIVERA-App: Sie gehen nur an den jeweiligen Gateway-Benutzer und melden
+  Störungen des Gateways.
 
 ## Funktionen
 
@@ -31,6 +61,7 @@ kommt gesammelt in einer Nachricht. Voraussetzung ist der eingerichtete E-Mail-V
 - **Ziele:** Mitteilung (mit oder ohne Push) oder Alarm, Empfänger über RIC, angekreuzte Gruppen oder einzelne Personen
 - **Betrieb:** Protokoll, Verbindungstest, Schlüsselprüfung, manueller Abruf, Testmodus je Löschgruppe
 - **Benutzer:** Rechte je Bereich, Rollen als Vorlage, Beschränkung auf einzelne Löschgruppen
+- **Als App:** auf Handy, Tablet und Rechner installierbar, Push-Meldungen bei Störungen
 - **Übersicht für Administratoren:** angemeldete Benutzer, erfolgreiche und fehlgeschlagene Meldungen
 - **Hilfe im Gateway:** Schritte, Begriffe, Felder und häufige Fragen unter „Hilfe" in der Kopfzeile
 
@@ -376,6 +407,8 @@ Meldungen erfolgreich oder fehlgeschlagen sind.
   gesendete Inhalt im Protokoll. Aufbewahrung über `LOG_DAYS` (Standard 30 Tage).
 - Nach „Empfänger aus DIVERA laden" liegen Namen der Mitglieder in der Gateway-Datenbank.
 - Die Oberfläche lädt keine Inhalte von fremden Servern.
+- Push-Meldungen laufen verschlüsselt über den Push-Dienst des jeweiligen Browsers (Google, Apple, Mozilla,
+  Microsoft). Wer das nicht möchte, schaltet Push einfach nicht ein; dann baut das Gateway dorthin keine Verbindung auf.
 - **Sicherung:** bei Proxmox am einfachsten der ganze Container per Backup-Job.
 
 ## Einstellungen

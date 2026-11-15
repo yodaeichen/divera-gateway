@@ -98,3 +98,31 @@ ol.steps { margin:0; padding-left:22px; } ol.steps li { padding:5px 0; }
 header { height:auto; min-height:54px; flex-wrap:wrap; gap:6px 14px; padding:6px 18px; }
 header .brand, header nav a, header button, header a.sponsor { white-space:nowrap; }
 header nav { gap:4px 12px; flex-wrap:wrap; font-size:14.5px; }
+
+/* Als App und auf dem Handy */
+.hint.bad { color:#b42318; } .actions.wrap { flex-wrap:wrap; } .scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+#push-card h3 { font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:20px 0 6px; }
+[hidden] { display:none !important; }
+header { padding-top:calc(6px + env(safe-area-inset-top)); padding-left:calc(18px + env(safe-area-inset-left)); padding-right:calc(18px + env(safe-area-inset-right)); }
+footer { padding-bottom:env(safe-area-inset-bottom); }
+@media (max-width:760px) {
+  body { font-size:16px; }
+  /* Kopfzeile: Marke und Abmelden oben, das Menü darunter als Leiste zum Wischen */
+  header { gap:6px 10px; padding-bottom:0; }
+  header .brand { flex:1; order:1; } header a.sponsor { display:none; } header form { order:2; }
+  header nav { order:3; flex:0 0 100%; flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; gap:0; margin:0 -18px; padding:0 10px; }
+  header nav::-webkit-scrollbar { display:none; }
+  header nav a { padding:11px 9px; font-size:15px; }
+  main { margin:16px auto; padding:0 12px; } .card { padding:14px; margin-bottom:14px; }
+  /* Eingabefelder mit 16 Pixeln, sonst zoomt das iPhone beim Antippen hinein */
+  input[type=text],input[type=password],input[type=number],input[type=file],select,textarea { font-size:16px; padding:10px; }
+  button,.btn { padding:11px 16px; } header button { padding:6px 10px; font-size:14px; } button.link { padding:8px 0; }
+  .actions { flex-wrap:wrap; } label.check { padding:5px 0; } label.check input { width:20px; height:20px; flex:none; }
+  /* Breite Tabellen lassen sich in ihrer Karte seitlich schieben, statt die Seite zu sprengen */
+  .card:has(> table), .card:has(> form > table) { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  th,td { padding:8px 8px; } td.detail { max-width:240px; } td code { word-break:normal; white-space:nowrap; } td.detail code { word-break:break-all; white-space:normal; }
+  .stats { flex-wrap:wrap; } .stat { flex:1 1 130px; } .tiles { grid-template-columns:1fr 1fr; gap:10px; } .tile { padding:14px; }
+  .tabs { overflow-x:auto; } .tabs a { white-space:nowrap; }
+  .login { margin:32px auto; }
+}
+@media (max-width:420px) { .tiles { grid-template-columns:1fr; } }

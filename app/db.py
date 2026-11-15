@@ -60,6 +60,21 @@ class Setting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
 
 
+class PushDevice(Base):
+    """Ein Handy oder Rechner, auf dem ein Benutzer Push-Meldungen eingeschaltet hat (push.py)."""
+    __tablename__ = "push_devices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Die Adresse beim Push-Dienst ist geheim (wer sie kennt, kann dem Gerät etwas schicken): verschlüsselt, zum Wiederfinden ein Hash
+    endpoint_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    endpoint_enc: Mapped[str] = mapped_column(Text, default="")
+    p256dh: Mapped[str] = mapped_column(String(120), default="")
+    auth: Mapped[str] = mapped_column(String(40), default="")
+    label: Mapped[str] = mapped_column(String(120), default="")
+    created: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    last_ok: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class Tenant(Base):
     """Eine Löschgruppe mit eigenem DIVERA-Zugang."""
     __tablename__ = "tenants"
