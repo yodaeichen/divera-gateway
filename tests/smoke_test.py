@@ -880,6 +880,7 @@ with TestClient(app, base_url="http://testserver") as c:
     for bild, kopf in (("img/feuer.webp", b"RIFF"), ("img/atemschutz.svg", b"<svg"), ("icons/logo-96.png", b"\x89PNG")):
         assert open(os.path.join(static, bild), "rb").read(4) == kopf and anon.get(f"/static/{bild}").status_code == 200, bild
     assert "url(/static/img/feuer.webp)" in anon.get("/static/style.css").text and "/static/icons/logo-96.png" in c.get("/").text
+    assert "footer.fuss { position:fixed;" in anon.get("/static/style.css").text and 'class="fz-von"' in loginpage, "Fußzeile steht fest am Fensterrand"
     acc = e.get("/account").text
     public = re.search(r'id="push-card" data-key="([\w-]+)"', acc).group(1)
     assert len(push.unb64(public)) == 65 and public == re.search(r'data-key="([\w-]+)"', c.get("/account").text).group(1), "ein Schlüssel für alle"

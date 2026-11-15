@@ -146,18 +146,32 @@ button:not([class]):hover, .btn:not(.light):not(.klein):hover { background:#2b2f
 .card { box-shadow:0 1px 2px rgba(22,24,29,.04); }
 .tile:hover { border-color:var(--feuer); } .tile.alarm { border-left:4px solid var(--alarm); }
 code { background:#f1ede7; } th { color:var(--muted); }
-footer.fuss { position:relative; max-width:none; width:100%; margin:56px 0 0; padding:0; overflow:hidden; text-align:left; flex:none;
-  min-height:230px; display:flex; flex-direction:column; justify-content:flex-end;
-  background:url(/static/img/feuer.webp) center top / max(100%, 1100px) auto no-repeat; }
-footer.fuss .fuss-figur { position:absolute; right:max(4%, calc(50% - 600px)); bottom:-128px; height:400px; width:auto; opacity:.5; pointer-events:none; user-select:none; }
-footer.fuss .fuss-zeile { position:relative; background:rgba(22,24,29,.93); color:#d9dde4; font-size:13px; text-align:center;
-  padding:11px 20px calc(11px + env(safe-area-inset-bottom)); }
+/* Fester Rahmen: Kopfzeile oben, Flammen und Fußzeile unten am Fensterrand, der Inhalt läuft dazwischen.
+   Die Höhe der Flammen richtet sich nach der Höhe des Fensters. */
+:root { --fuss-feuer:clamp(56px, 13vh, 150px); --fuss-zeile:38px; --fuss-h:calc(var(--fuss-feuer) + var(--fuss-zeile) + env(safe-area-inset-bottom)); }
+body { padding-bottom:calc(var(--fuss-h) + 16px); }
+main, main.breit { max-width:1400px; }
+footer.fuss { position:fixed; left:0; right:0; bottom:0; z-index:15; max-width:none; width:auto; height:var(--fuss-h); margin:0; padding:0; overflow:hidden; text-align:left;
+  background:url(/static/img/feuer.webp) center 7% / max(100%, 1100px) auto no-repeat, linear-gradient(to bottom, rgba(247,244,240,0), var(--bg) 26px); }
+footer.fuss .fuss-figur { position:absolute; right:max(4%, calc(50% - 640px)); top:4px; bottom:auto; height:calc(var(--fuss-feuer) * 2.5); width:auto; opacity:.5; pointer-events:none; user-select:none; }
+footer.fuss .fuss-zeile { position:absolute; left:0; right:0; bottom:0; height:calc(var(--fuss-zeile) + env(safe-area-inset-bottom)); padding:0 16px env(safe-area-inset-bottom);
+  display:flex; align-items:center; justify-content:center; gap:.45em; white-space:nowrap; background:rgba(22,24,29,.94); color:#d9dde4; font-size:13px; }
 footer.fuss .fuss-zeile a { color:#fff; } footer.fuss .fuss-zeile a:hover { color:#ffa54a; }
+@media (min-width:1200px) {
+  header { position:sticky; top:0; z-index:20; } html { scroll-padding-top:76px; } .card[id] { scroll-margin-top:76px; }
+  .live { top:76px; max-height:calc(100vh - 76px - var(--fuss-h) - 16px); }
+}
 @media (max-width:760px) {
-  footer.fuss { min-height:170px; margin-top:36px; } footer.fuss .fuss-figur { height:250px; bottom:-74px; right:-12px; }
+  :root { --fuss-feuer:clamp(40px, 8vh, 72px); --fuss-zeile:34px; }
+  footer.fuss .fuss-figur { right:-6px; } footer.fuss .fuss-zeile { font-size:12px; } footer.fuss .fz-von { display:none; }
   header a.brand img { width:26px; height:26px; }
 }
-@media print { footer.fuss { display:none; } body { display:block; background:#fff; } }
+/* Sehr niedrige Fenster (Handy quer): nichts festhalten, der Fuß steht wieder am Ende der Seite */
+@media (max-height:520px) {
+  :root { --fuss-feuer:56px; } body { padding-bottom:0; } header { position:static; }
+  footer.fuss { position:relative; flex:none; margin-top:24px; }
+}
+@media print { footer.fuss { display:none; } header { position:static; } body { display:block; background:#fff; padding-bottom:0; } }
 .live .msg { border-left-color:var(--alarm); } .live .msg.news { border-left-color:#0b5cad; }
 .tabs a { background:#f1ede7; } .tabs a.on { background:#fff; border-top:3px solid var(--feuer); }
 .stat.ok strong { color:var(--ok); }

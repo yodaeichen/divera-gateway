@@ -2,6 +2,14 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 2.4.1
+
+- **Fester Rahmen:** Die Kopfzeile bleibt oben, Flammen und Fußzeile mit der Versionsnummer bleiben unten am
+  Fensterrand stehen, der Inhalt läuft dazwischen. Die Fußzeile ist damit auf jeder Seite ohne Scrollen zu sehen
+- Die Höhe der Flammen richtet sich nach der Fensterhöhe; auf dem Handy sind sie flacher und die Kopfzeile läuft mit
+  dem Inhalt mit, damit mehr Platz bleibt. Bei sehr niedrigen Fenstern (Handy quer) steht der Fuß am Seitenende
+- Alle Seiten haben dieselbe Inhaltsbreite (bis 1400 Pixel)
+
 ## 2.4.0
 
 - **Neues Logo:** App-Symbol mit Feuerhintergrund, Atemschutzträger und dem Kürzel „DG"; es erscheint auf dem
