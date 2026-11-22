@@ -317,6 +317,11 @@ Bei der Benachrichtigung gibt es zwei Möglichkeiten: „Wie in DIVERA eingestel
 kennt RIC. „Nur über diese Wege" lässt Push, SMS, Sprachanruf, E-Mail und Pager einzeln ankreuzen; das läuft über
 `api/v2/news` bzw. `api/v2/alarms`, braucht den persönlichen Accesskey und überträgt keine RIC.
 
+**Mail übernehmen:** Unter „Mitteilungen" zeigt „Letzte Mails anzeigen" die neuesten Mails der Postfächer der
+Löschgruppe. „Übernehmen" füllt Stichwort (Betreff ohne „WG:") und Text aus, die Anhänge der Mail lassen sich einzeln
+ankreuzen. So lässt sich eine einzelne Mail ohne Regel weitergeben. Dafür braucht es zusätzlich das Recht
+„Quellen ansehen".
+
 Bei Mitteilungen lassen sich Dateien anhängen (Vorgabe: keine). Mit Anhang geht die Mitteilung immer über
 `api/v2/news` mit dem persönlichen Accesskey; bei „Wie in DIVERA eingestellt" wird dann per Push benachrichtigt.
 

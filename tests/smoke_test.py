@@ -1278,6 +1278,66 @@ with TestClient(app, base_url="http://testserver") as c:
         assert uploads.clean_name("../../etc/passwd") == "passwd" and uploads.clean_name('a<b>"c.pdf') == "a_b__c.pdf" and uploads.load("../x", 1) == []
     finally:
         rules.send_divera = keep_send
+    # Mitteilung aus einer eingegangenen Mail, ohne Regel
+    keep_t, keep_f = sources.TESTERS["m365"], sources.FETCHERS["m365"]
+    fetched = []
+    long_body = "Sehr geehrte Damen und Herren,   \r\n\r\n\r\n\r\nanbei die Anordnung.\r\n" + "x" * 1200
+    sources.TESTERS["m365"] = lambda cfg, count=10: {"message": "ok", "items": [
+        {"ts": dt.datetime(2026, 11, 13, 13, 40), "from": "amt@stadt.example", "subject": "WG: verkehrsrechtliche Anordnung (Musterstadt, Neudorf, Dachsweg)", "preview": "", "ref": "AAA=1"},
+        {"ts": dt.datetime(2026, 11, 13, 12, 0), "from": "info@verein.example", "subject": "Lesenacht", "preview": "", "ref": "AAA=2"}]}
+    def fake_fetch(cfg, ref):
+        fetched.append(ref)
+        return {"id": "x", "from": "amt@stadt.example", "subject": "WG: verkehrsrechtliche Anordnung (Musterstadt, Neudorf, Dachsweg)",
+                "body": long_body, "date": "", "attachments": [dict(a) for a in found]}
+    sources.FETCHERS["m365"] = fake_fetch
+    sent_mail = []
+    rules.send_divera = lambda key, payload, files=None: sent_mail.append((key, payload, files)) or (True, 'HTTP 200: {"success":true}')
+    try:
+        newsp = c.get("/news?tenant=1").text
+        assert "Aus einer eingegangenen Mail" in newsp and 'href="/news/mails?tenant=1#mails"' in newsp and "Übernehmen" not in newsp
+        assert "Aus einer eingegangenen Mail" not in c.get("/alarms?tenant=1").text
+        lst = c.get("/news/mails?tenant=1").text
+        assert lst.index("Dachsweg") < lst.index("Lesenacht") and lst.count(">Übernehmen</button>") == 2 and "Leitstelle" in lst and not fetched
+        took = c.post("/news/from-mail", data={"csrf": tok, "tenant_id": "1", "source_id": "1", "ref": "AAA=1"}).text
+        assert fetched == ["AAA=1"] and "Übernommen aus der Mail" in took and "wurden gekürzt" in took
+        title_v = re.search(r'name="title" value="([^"]*)"', took).group(1)
+        assert title_v == "verkehrsrechtliche Anordnung (Musterstadt, Neudorf" and not title_v.startswith("WG")
+        from app.main import short_title
+        assert short_title("Kurz") == "Kurz" and short_title("Einladung zur Jahreshauptversammlung der Löschgruppe Musterdorf") == "Einladung zur Jahreshauptversammlung der"
+        assert len(short_title("x" * 80)) == 50
+        body_v = re.search(r'<textarea name="text"[^>]*>([^<]*)</textarea>', took).group(1)
+        assert body_v.startswith("Sehr geehrte Damen und Herren,\n\nanbei") and len(body_v) == 1000 and body_v.endswith("…")
+        assert 'name="mail_att" value="0"' in took and "Anordnung Hasenweg.pdf" in took and 'name="mail_att" value="0" checked' not in took
+        assert "image001.png" not in took.split("Anhänge aus der Mail")[1].split("Anhang (optional)")[0], "eingebettete Bilder nicht anbieten"
+        MAILF = {"csrf": tok, "tenant_id": "1", "kind": "news", "notify": "default", "title": "Sperrung Dachsweg", "text": "Siehe Anhang", "grp": ["12"],
+                 "mail_src": "1", "mail_ref": "AAA=1", "mail_subject": "WG: verkehrsrechtliche Anordnung", "mail_from": "amt@stadt.example"}
+        # ohne Haken: keine Datei
+        c.post("/send", data=dict(MAILF, confirm="ja"))
+        assert sent_mail[-1][2] is None and len(fetched) == 1
+        with m.SessionLocal() as db:
+            last_hand = db.query(m.Log).filter_by(source_name="Meldung von Hand").order_by(m.Log.id.desc()).first()
+            assert "übernommen aus der Mail „WG: verkehrsrechtliche Anordnung“ von amt@stadt.example" in last_hand.detail
+        # mit Haken: die Datei der Mail geht mit, über Bestätigung und Ablage
+        askm = c.post("/send", data=dict(MAILF, mail_att=["0", "2"])).text
+        assert "Anordnung Hasenweg.pdf" in askm and "baustelle.jpg" in askm and 'name="mail_att"' not in askm and len(fetched) == 2
+        tok_m = re.search(r'name="upload" value="([\w-]+)"', askm).group(1)
+        c.post("/send", data=dict(MAILF, upload=tok_m, confirm="ja"))
+        assert [(f["name"], f["data"]) for f in sent_mail[-1][2]] == [("Anordnung Hasenweg.pdf", b"%PDF-1.4 anordnung"), ("baustelle.jpg", b"\xff\xd8foto")]
+        assert len(fetched) == 2, "die Mail wird beim Bestätigen nicht noch einmal geholt"
+        # Rechte und Zuordnung
+        assert n1.get("/news/mails?tenant=1").status_code == 403 and n1.post("/news/from-mail", data={"csrf": n1t, "tenant_id": "1", "source_id": "1", "ref": "x"}).status_code == 403
+        assert e.get("/news/mails?tenant=2").status_code == 404
+        assert c.post("/news/from-mail", data={"csrf": tok, "tenant_id": "2", "source_id": "1", "ref": "AAA=1"}).status_code == 400
+        sources.FETCHERS["m365"] = lambda cfg, ref: (_ for _ in ()).throw(RuntimeError("Graph-Fehler 404"))
+        assert "Die Mail konnte nicht geladen werden" in c.post("/news/from-mail", data={"csrf": tok, "tenant_id": "1", "source_id": "1", "ref": "weg"}).text
+        assert "Anhänge der Mail konnten nicht geladen werden" in c.post("/send", data=dict(MAILF, mail_att=["0"])).text
+        sources.TESTERS["m365"] = lambda cfg, count=10: (_ for _ in ()).throw(RuntimeError("Graph-Fehler 502"))
+        assert "„Leitstelle“: RuntimeError: Graph-Fehler 502" in c.get("/news/mails?tenant=1").text
+        assert "kein aktives Postfach" in c.get("/news/mails?tenant=2").text
+    finally:
+        sources.TESTERS["m365"], sources.FETCHERS["m365"] = keep_t, keep_f
+        rules.send_divera = keep_send
+
     rules.send_divera = lambda key, payload: hand.append((key, payload)) or (True, 'HTTP 200: {"success":true}')
 
     rules.send_divera = lambda key, payload: (False, "HTTP 500: kaputt")

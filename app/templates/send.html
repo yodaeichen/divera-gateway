@@ -15,9 +15,31 @@
   {% if not tenants %}<p class="hint">Dir ist noch keine Löschgruppe freigegeben.</p>{% endif %}
 </div>
 
+{% if tenant and mode == 'news' and perm.sources >= 1 %}
+<div class="card" id="mails">
+  <div class="row"><h2>Aus einer eingegangenen Mail</h2>
+    <a class="btn light" href="/news/mails?tenant={{ tenant.id }}#mails">{{ 'Liste neu laden' if mails is defined else 'Letzte Mails anzeigen' }}</a></div>
+  {% if mails is defined %}
+  {% for p in mail_problems %}<div class="flash err">{{ p }}</div>{% endfor %}
+  <table>
+    <tr><th>Eingang</th><th>Absender</th><th>Betreff</th><th>Postfach</th><th></th></tr>
+    {% for i in mails %}
+    <tr><td style="white-space:nowrap">{{ i.ts|localtime if i.ts else '' }}</td><td>{{ i['from'] }}</td><td>{{ i.subject }}</td><td>{{ i.source }}</td>
+      <td><form method="post" action="/news/from-mail"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="tenant_id" value="{{ tenant.id }}">
+        <input type="hidden" name="source_id" value="{{ i.source_id }}"><input type="hidden" name="ref" value="{{ i.ref }}"><button class="light" style="white-space:nowrap">Übernehmen</button></form></td></tr>
+    {% else %}<tr><td colspan="5">Keine Mails gefunden.</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+  <p class="hint">Übernimmt Betreff und Text einer Mail aus den Postfächern dieser Löschgruppe in das Formular darunter, ohne Regel. Dort lässt sich alles anpassen; gesendet wird erst nach der Bestätigung.</p>
+</div>
+{% endif %}
+
 {% if tenant %}
-<form method="post" action="/send" enctype="multipart/form-data">
+<form method="post" action="/send" enctype="multipart/form-data" id="formular">
 <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="tenant_id" value="{{ tenant.id }}"><input type="hidden" name="kind" value="{{ mode }}">
+{% if v.get('mail_ref') %}<input type="hidden" name="mail_src" value="{{ v.mail_src }}"><input type="hidden" name="mail_ref" value="{{ v.mail_ref }}">
+<input type="hidden" name="mail_subject" value="{{ v.mail_subject }}"><input type="hidden" name="mail_from" value="{{ v.mail_from }}">
+<div class="flash">Übernommen aus der Mail „{{ v.mail_subject }}“ von {{ v.mail_from }}. Bitte Stichwort, Text und Empfänger prüfen.{% if v.get('mail_cut') %} Betreff oder Text waren länger als bei DIVERA erlaubt und wurden gekürzt.{% endif %}</div>{% endif %}
 <div class="card">
   <h2>{{ 'Neuer Alarm' if mode == 'alarm' else 'Neue Mitteilung' }} an {{ tenant.name }}</h2>
   <p class="hint">Sendet einmalig {{ 'einen Alarm' if mode == 'alarm' else 'eine Mitteilung' }} an DIVERA, ohne dass eine Regel oder eine eingegangene Nachricht nötig ist. Vor dem Senden erscheint eine Seite zur Bestätigung.</p>
@@ -28,6 +50,12 @@
   <label>Adresse (optional)</label><input type="text" name="address" value="{{ v.get('address', '') }}" maxlength="200">
   <p class="hint">Einsatzort für Karte und Navigation.</p>
   {% if mode == 'news' %}
+  {% if v.get('mail_files') %}
+  <label>Anhänge aus der Mail</label>
+  {% for f in v.mail_files %}<label class="check"><input type="checkbox" name="mail_att" value="{{ f.index }}"> {{ f.name }} <span class="hint">({{ f.kb }} kB)</span></label>{% endfor %}
+  <p class="hint">Ohne Haken geht kein Anhang der Mail mit.</p>
+  {% endif %}
+  {% if v.get('mail_skipped') %}<p class="hint">Nicht übernehmbar: {{ v.mail_skipped|join(', ') }}</p>{% endif %}
   <label>Anhang (optional)</label>
   {% if v.get('files') %}<p>Angehängt: <strong>{{ v.files|join(', ') }}</strong></p>
   <input type="hidden" name="upload" value="{{ v.upload }}">

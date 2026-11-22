@@ -515,15 +515,15 @@ def events_home(request: Request, tenant: int | None = None, db: Session = Depen
     return page(request, "events_home.html", user, tenants=visible_tenants(db, user))
 
 
-async def collect_uploads(form, user: m.User, kind: str) -> tuple[list[dict], str, str]:
-    """Anhänge aus dem Sendeformular: schon abgelegte (Kennzeichen „upload“) plus neu ausgewählte Dateien.
-    Gibt die Dateien, das Kennzeichen der Ablage und eine Fehlermeldung zurück."""
+async def collect_uploads(form, user: m.User, kind: str, from_mail: list[dict] | None = None) -> tuple[list[dict], str, str]:
+    """Anhänge aus dem Sendeformular: schon abgelegte (Kennzeichen „upload“), neu ausgewählte Dateien und die
+    angekreuzten Anhänge einer übernommenen Mail. Gibt die Dateien, das Kennzeichen der Ablage und eine Fehlermeldung zurück."""
     token = text(form, "upload", 80)
     if "drop_files" in form or kind != "news":   # Anhänge gibt es nur bei Mitteilungen
         uploads.remove(token)
         return [], "", ""
     files = uploads.load(token, user.id) if token else []
-    fresh = []
+    fresh = list(from_mail or [])
     for item in form.getlist("files"):
         if not hasattr(item, "read") or not getattr(item, "filename", ""):
             continue
@@ -545,6 +545,96 @@ async def collect_uploads(form, user: m.User, kind: str) -> tuple[list[dict], st
     return uploads.load(token, user.id), token, ""
 
 
+MAIL_PICK_COUNT = 15
+
+
+def mail_sources(tenant: m.Tenant) -> list[m.Source]:
+    return [s for s in tenant.sources if s.active and s.type in sources.RECENT]
+
+
+async def mail_attachments_for(db: Session, user: m.User, tenant: m.Tenant, form) -> tuple[list[dict], str]:
+    """Holt die angekreuzten Anhänge der übernommenen Mail. Gibt Dateien und eine Fehlermeldung zurück."""
+    if access.perms_of(user)["sources"] < 1:
+        raise access.Denied("Mails der Postfächer darf nur sehen, wer Quellen sehen darf.")
+    source = source_for(db, user, text(form, "mail_src", 20) or 0)
+    if source.tenant_id != tenant.id or source.type not in sources.FETCHERS:
+        raise HTTPException(400, "Quelle passt nicht zur Löschgruppe")
+    wanted = {int(i) for i in form.getlist("mail_att") if str(i).isdigit()}
+
+    def load() -> list[dict]:
+        msg = sources.FETCHERS[source.type](source.config, text(form, "mail_ref", 600))
+        chosen, _ = rules.choose_attachments("all", sources.attachments_of(msg))
+        picked = [item for number, item in enumerate(chosen) if number in wanted]
+        return [{"name": uploads.clean_name(item["name"]), "type": item["type"], "data": sources.attachment_bytes(item)} for item in picked]
+    try:
+        return await asyncio.to_thread(load), ""
+    except Exception as exc:
+        return [], f"Die Anhänge der Mail konnten nicht geladen werden ({type(exc).__name__}: {str(exc)[:200]})."
+
+
+def tidy_body(body: str) -> str:
+    """Mailtext für eine Mitteilung: ohne überflüssige Leerzeilen und auf die Länge begrenzt, die DIVERA annimmt."""
+    body = re.sub(r"[ \t]+\n", "\n", (body or "").replace("\r\n", "\n"))
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    return body if len(body) <= rules.LIMITS["text"] else body[:rules.LIMITS["text"] - 1].rstrip() + "…"
+
+
+def short_title(subject: str) -> str:
+    """Betreff als Stichwort; ist er zu lang, endet das Stichwort an einer Wortgrenze statt mitten im Wort."""
+    limit = rules.LIMITS["title"]
+    if len(subject) <= limit:
+        return subject
+    cut = subject[:limit]
+    if subject[limit] not in " ,;:)" and cut.rfind(" ") > limit // 2:
+        cut = cut[:cut.rfind(" ")]
+    return cut.rstrip(" ,;:-(")
+
+
+@app.get("/news/mails")
+async def news_mails(request: Request, tenant: int, db: Session = Depends(get_db), user: m.User = Depends(allow("send", "sources:1"))):
+    """Die letzten Mails aller Postfächer einer Löschgruppe, zum Übernehmen in eine Mitteilung."""
+    chosen = tenant_for(db, user, tenant)
+    mails, problems = [], []
+    for source in mail_sources(chosen):
+        try:
+            listing = await asyncio.to_thread(sources.listing, source.type, source.config, MAIL_PICK_COUNT)
+        except Exception as exc:
+            problems.append(f"„{source.name}“: {type(exc).__name__}: {str(exc)[:160]}")
+            continue
+        mails += [dict(item, source_id=source.id, source=source.name) for item in listing.get("items", [])]
+    mails.sort(key=lambda item: item.get("ts") or dt.datetime.min, reverse=True)
+    if not mail_sources(chosen):
+        problems.append("Diese Löschgruppe hat kein aktives Postfach als Quelle.")
+    return send_page(request, user, db, chosen, mode="news", mails=mails[:MAIL_PICK_COUNT], mail_problems=problems)
+
+
+@app.post("/news/from-mail")
+async def news_from_mail(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send", "sources:1"))):
+    """Übernimmt eine Mail in das Formular für eine Mitteilung. Gesendet wird erst nach Bearbeiten und Bestätigen."""
+    form = await read_form(request)
+    tenant = tenant_for(db, user, int(form.get("tenant_id") or 0))
+    source = source_for(db, user, form.get("source_id") or 0)
+    if source.tenant_id != tenant.id or source.type not in sources.FETCHERS:
+        raise HTTPException(400, "Quelle passt nicht zur Löschgruppe")
+    ref = text(form, "ref", 600)
+
+    def load():
+        msg = sources.FETCHERS[source.type](source.config, ref)
+        chosen, skipped = rules.choose_attachments("all", sources.attachments_of(msg))
+        return msg, chosen, skipped
+    try:
+        msg, attached, skipped = await asyncio.to_thread(load)
+    except Exception as exc:
+        flash(request, f"Die Mail konnte nicht geladen werden ({type(exc).__name__}: {str(exc)[:200]}).", "err")
+        return go(f"/news/mails?tenant={tenant.id}")
+    subject = rules.clean_subject(msg.get("subject", ""))
+    values = {"kind": "news", "notify": "default", "title": short_title(subject), "text": tidy_body(msg.get("body", "")),
+              "mail_src": str(source.id), "mail_ref": ref, "mail_subject": (msg.get("subject") or "")[:300], "mail_from": msg.get("from", "")[:200],
+              "mail_files": [{"index": n, "name": item["name"], "kb": max(1, item["size"] // 1024)} for n, item in enumerate(attached)],
+              "mail_skipped": skipped, "mail_cut": len(subject) > rules.LIMITS["title"] or len(msg.get("body", "")) > rules.LIMITS["text"]}
+    return send_page(request, user, db, tenant, mode="news", v=values)
+
+
 @app.post("/send")
 async def send_now(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
     """Sendet eine von Hand geschriebene Mitteilung oder einen Alarm. Zwei Schritte: Bestätigungsseite, dann Senden."""
@@ -553,12 +643,18 @@ async def send_now(request: Request, db: Session = Depends(get_db), user: m.User
     rule = manual_rule(form, tenant)
     known = {name for name, _ in rules.CHANNELS}
     channels = [c for c in form.getlist("channel") if c in known] if form.get("notify") == "custom" else None
-    files, token, error = await collect_uploads(form, user, rule.kind)
+    mail_files, mail_error = [], ""
+    if form.getlist("mail_att") and rule.kind == "news":
+        mail_files, mail_error = await mail_attachments_for(db, user, tenant, form)
+    files, token, error = await collect_uploads(form, user, rule.kind, mail_files)
+    error = error or mail_error
     values = {"kind": rule.kind, "notify": "custom" if channels is not None else "default", "channels": channels or [],
               "priority": rule.priority, "ric": rule.ric,
               "title": rule.title_tpl, "text": rule.text_tpl, "address": rule.address_tpl,
               "ucr": [int(i) for i in rules.id_list(rule.ucr_ids)], "grp": [int(i) for i in rules.id_list(rule.group_ids)],
-              "upload": token, "files": [f["name"] for f in files]}
+              "upload": token, "files": [f["name"] for f in files],
+              "mail_src": text(form, "mail_src", 20), "mail_ref": text(form, "mail_ref", 600), "mail_subject": text(form, "mail_subject", 300),
+              "mail_from": text(form, "mail_from", 200)}
     if error:
         pass
     elif files and not tenant.accesskey_user_enc:
@@ -586,7 +682,7 @@ async def send_now(request: Request, db: Session = Depends(get_db), user: m.User
         lookup = {str(entry["id"]): entry["name"] for entry in directory[kind]}
         return [lookup.get(i, f"ID {i}") for i in rules.id_list(ids)]
     if form.get("confirm") != "ja":
-        fields = [(k, v) for k, v in form.multi_items() if k not in ("csrf", "confirm", "edit", "upload", "drop_files") and isinstance(v, str)]
+        fields = [(k, v) for k, v in form.multi_items() if k not in ("csrf", "confirm", "edit", "upload", "drop_files", "mail_att") and isinstance(v, str)]
         if token:
             fields.append(("upload", token))
         return page(request, "rule_send_confirm.html", user, tenant=tenant, rule=rule, data=data, fields=fields, manual=True,
@@ -602,7 +698,8 @@ async def send_now(request: Request, db: Session = Depends(get_db), user: m.User
         uploads.remove(token)
     db.add(m.Log(tenant_id=tenant.id, tenant_name=tenant.name, source_name="Meldung von Hand", rule_name="",
                  sender=user.username, subject=rules.title_of(data["payload"])[:300], status="gesendet" if ok else "fehler",
-                 detail=f"{'Alarm' if rule.kind == 'alarm' else 'Mitteilung'} | {detail} | ausgelöst von {user.username}"[:2000]))
+                 detail=(f"{'Alarm' if rule.kind == 'alarm' else 'Mitteilung'} | {detail} | ausgelöst von {user.username}"
+                         + (f" | übernommen aus der Mail „{values['mail_subject']}“ von {values['mail_from']}" if values["mail_ref"] else ""))[:2000]))
     db.commit()
     if ok:
         return send_page(request, user, db, tenant, mode=mode, sent={"kind": rule.kind, "title": rules.title_of(data["payload"]), "detail": detail})

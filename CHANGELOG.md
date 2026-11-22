@@ -2,6 +2,16 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 2.6.0
+
+- **Mail als Mitteilung weitergeben, ohne Regel:** Unter „Mitteilungen" zeigt „Letzte Mails anzeigen" die neuesten
+  Mails aller Postfächer der Löschgruppe. „Übernehmen" trägt Betreff (ohne „WG:" usw.) und Text in das Formular ein;
+  zu lange Angaben werden auf die Grenzen von DIVERA gekürzt. Empfänger, Text und Anhänge lassen sich anpassen,
+  gesendet wird wie gewohnt erst nach der Bestätigung
+- Anhänge der Mail lassen sich einzeln ankreuzen (Vorgabe: keiner); eingebettete Bilder der Signatur werden nicht angeboten
+- Im Protokoll steht bei solchen Sendungen, aus welcher Mail sie übernommen wurden
+- Nötig sind die Rechte „Von Hand an DIVERA senden" und „Quellen ansehen"
+
 ## 2.5.0
 
 - **Anhänge bei Mitteilungen:** Unter „Mitteilungen" lassen sich beim Senden von Hand bis zu fünf Dateien (z. B. ein
