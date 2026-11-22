@@ -140,6 +140,8 @@ class Rule(Base):
     group_ids: Mapped[str] = mapped_column(String(1000), default="", server_default="")  # Gruppen (DIVERA-IDs)
     priority: Mapped[bool] = mapped_column(Boolean, default=False)
     push: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")  # nur Mitteilungen: mit oder ohne Push
+    # nur Mitteilungen: Anhänge der Mail mitschicken. "" = keine (Vorgabe), "pdf" = nur PDF-Dateien, "all" = alle Dateien
+    attachments: Mapped[str] = mapped_column(String(10), default="", server_default="")
     extra_params: Mapped[str] = mapped_column(Text, default="")
     stop: Mapped[bool] = mapped_column(Boolean, default=True)
     tenant: Mapped[Tenant] = relationship(back_populates="rules")
@@ -214,7 +216,8 @@ ADDED_COLUMNS = {
               "last_login": "DATETIME", "last_seen": "DATETIME", "email": "VARCHAR(200) DEFAULT ''",
               "invite_hash": "VARCHAR(64) DEFAULT ''", "invite_expires": "DATETIME", "notify": "TEXT DEFAULT ''"},
     "tenants": {"directory": "TEXT DEFAULT '{}'", "directory_ts": "DATETIME", "accesskey_user_enc": "TEXT DEFAULT ''"},
-    "rules": {"ucr_ids": "VARCHAR(1000) DEFAULT ''", "group_ids": "VARCHAR(1000) DEFAULT ''", "push": "BOOLEAN DEFAULT 1"},
+    "rules": {"ucr_ids": "VARCHAR(1000) DEFAULT ''", "group_ids": "VARCHAR(1000) DEFAULT ''", "push": "BOOLEAN DEFAULT 1",
+              "attachments": "VARCHAR(10) DEFAULT ''"},
 }
 
 

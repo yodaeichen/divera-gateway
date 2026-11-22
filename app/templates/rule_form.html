@@ -25,7 +25,7 @@
     {% for r in check.rows %}
     <tr><td style="white-space:nowrap">{{ r.ts|localtime if r.ts else '' }}</td><td>{{ r.from }}</td><td>{{ r.subject }}</td>
       <td>{% if r.match %}<span class="tag gesendet">greift</span>{% else %}<span class="tag">greift nicht</span><br><span class="hint">{{ r.failed|join(', ') }} passt nicht</span>{% endif %}</td>
-      <td>{% if r.match %}<strong>{{ r.title }}</strong>{% endif %}</td></tr>
+      <td>{% if r.match %}<strong>{{ r.title }}</strong>{% if check.files %}<br><span class="hint">{% if r.files %}Anhänge: {{ r.files|join(', ') }}{% else %}ohne Anhang{% endif %}{% if r.skipped %} · ausgelassen: {{ r.skipped|join(', ') }}{% endif %}</span>{% endif %}{% endif %}</td></tr>
     {% else %}<tr><td colspan="5">Der Ordner ist leer.</td></tr>{% endfor %}
   </table>
   <p class="hint">Geprüft wird die Regel, wie sie gerade im Formular steht. Es wurde nichts gespeichert und nichts gesendet.</p>
@@ -109,6 +109,9 @@
   <label>Benachrichtigung bei Mitteilungen</label>
   <select name="push"><option value="1" {{ 'selected' if not rule or rule.push is none or rule.push }}>mit Push</option><option value="0" {{ 'selected' if rule and rule.push is not none and not rule.push }}>ohne Push (nur in der App sichtbar)</option></select>
   <p class="hint">Gilt nur für die Art „Mitteilung". Ohne Push erscheint die Mitteilung in der App, aber ohne Ton und ohne Hinweis auf dem Sperrbildschirm; auch SMS, Anruf, E-Mail und Pager bleiben aus. Die Empfänger wählst du dann über angekreuzte Gruppen oder Personen, eine RIC wird dabei nicht übertragen. Dieser Weg braucht bei der Löschgruppe einen persönlichen Accesskey; „mit Push" kommt ohne ihn aus.</p>
+  <label>Anhänge aus der Mail</label>
+  <select name="attachments" style="max-width:320px">{% for key, label in attach_modes %}<option value="{{ key }}" {{ 'selected' if (rule.attachments if rule else '') == key or (not key and not (rule and rule.attachments)) }}>{{ label }}</option>{% endfor %}</select>
+  <p class="hint">Gilt nur für die Art „Mitteilung“, Vorgabe: keine Anhänge. „Nur PDF-Dateien“ schickt z. B. eine angehängte Anordnung mit, „Alle Dateien“ auch Bilder und Office-Dateien. Eingebettete Bilder wie Logos in der Signatur gehen nie mit; je Mitteilung höchstens {{ attach_limits.count }} Anhänge zu je {{ attach_limits.mb }} MB. Mit Anhängen geht die Mitteilung über die neuere DIVERA-Schnittstelle und braucht den persönlichen Accesskey; eine RIC wird dann nicht übertragen.</p>
   {% for kind, field, title, hint in [('groups', 'grp', 'Gruppen', 'Alarmiert alle Mitglieder der angekreuzten Gruppen.'), ('persons', 'ucr', 'Einzelne Personen', 'Alarmiert genau die angekreuzten Personen. Für eine Meldung an nur eine Person: hier eine Person ankreuzen, RIC und Gruppen leer lassen.')] %}
   <label>{{ title }} <span class="count" data-count="{{ field }}"></span></label>
   {% if directory[kind] or stale[kind] %}

@@ -25,6 +25,7 @@
     <tr><th>Personen</th><td>{{ persons|join(', ') or 'keine' }}</td></tr>
     {% if data.channels is defined %}<tr><th>Benachrichtigung</th><td>{{ data.channels }}</td></tr>{% endif %}
     {% endif %}
+    {% if data.files %}<tr><th>Anhänge</th><td>{{ data.files|join(', ') }}</td></tr>{% endif %}
   </table>
   <details style="margin-top:12px"><summary>Daten an die DIVERA-API</summary><pre>{{ data.payload|tojson(indent=2) }}</pre></details>
   <form method="post" style="margin-top:18px">

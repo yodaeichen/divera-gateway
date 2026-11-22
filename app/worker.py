@@ -10,7 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from . import db as m
-from . import backup, notify, rules, sources, syslog
+from . import backup, notify, rules, sources, syslog, uploads
 
 log = logging.getLogger("gateway.worker")
 LOG_DAYS = int(os.environ.get("LOG_DAYS", "30"))
@@ -101,6 +101,7 @@ def prune():
         db.execute(delete(m.SystemEvent).where(m.SystemEvent.ts < m.utcnow() - dt.timedelta(days=LOG_DAYS)))
         db.execute(delete(m.ImportBatch).where(m.ImportBatch.created < m.utcnow() - dt.timedelta(days=1)))
         db.commit()
+    uploads.prune()
 
 
 async def loop():

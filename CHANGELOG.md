@@ -2,6 +2,22 @@
 
 Die Versionsnummer steht in `app/version.py` und wird unten auf jeder Seite des Gateways angezeigt.
 
+## 2.5.0
+
+- **Anhänge bei Mitteilungen:** Unter „Mitteilungen" lassen sich beim Senden von Hand bis zu fünf Dateien (z. B. ein
+  PDF) anhängen. Die Datei liegt bis zur Bestätigung im Datenverzeichnis und wird nach dem Senden, spätestens nach
+  einem Tag gelöscht
+- **Anhänge aus der Mail bei automatischen Regeln:** neue Auswahl „Anhänge aus der Mail" mit *Keine Anhänge* (Vorgabe),
+  *Nur PDF-Dateien* und *Alle Dateien*. Eingebettete Bilder wie Logos in der Signatur gehen nie mit. Die Prüfung
+  „Gegen die letzten Nachrichten prüfen" zeigt, welche Dateien mitgehen würden, im Testmodus steht es im Protokoll
+- Übertragung: Die Mitteilung wird über `api/v2/news` angelegt, danach jeder Anhang einzeln über
+  `api/v2/news/attachment/{id}` hochgeladen. Mit Anhang geht eine Mitteilung deshalb immer über die neuere Schnittstelle
+  und braucht den persönlichen Accesskey; eine RIC wird dann nicht übertragen. Lehnt DIVERA einen Anhang ab, steht die
+  Meldung im Protokoll als Fehler (die Mitteilung selbst ist dann schon angelegt)
+- Grenzen einstellbar über `ATTACH_MAX_MB` (Vorgabe 10 MB je Datei) und `ATTACH_MAX_COUNT` (Vorgabe 5)
+- Alarme bleiben ohne Anhänge
+- Neue Spalte `attachments` in der Tabelle `rules`; sie wird beim Start von selbst angelegt
+
 ## 2.4.1
 
 - **Fester Rahmen:** Die Kopfzeile bleibt oben, Flammen und Fußzeile mit der Versionsnummer bleiben unten am

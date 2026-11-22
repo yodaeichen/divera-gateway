@@ -68,7 +68,7 @@
     <tr><th>Abschnitt</th><th>Was eintragen</th></tr>
     <tr><td>1. Bedingungen</td><td>Textstücke, die in Absender, Betreff oder Text vorkommen müssen. Mehrere Begriffe in einem Feld mit Semikolon trennen: einer davon genügt. Mehrere Felder müssen alle zutreffen.</td></tr>
     <tr><td>2. Ausdrücke</td><td>Optional. Je Zeile ein Ausdruck, der einen Wert herausliest, z. B. das Stichwort. Der Regelvorschlag füllt das für Zeilen der Form „Bezeichnung: Wert" selbst aus.</td></tr>
-    <tr><td>3. Ziel</td><td>Art (Mitteilung oder Alarm), Push ja oder nein, Empfänger sowie Stichwort, Text und Adresse als fester Text oder mit Platzhaltern.</td></tr>
+    <tr><td>3. Ziel</td><td>Art (Mitteilung oder Alarm), Push ja oder nein, bei Mitteilungen auf Wunsch die Anhänge der Mail, Empfänger sowie Stichwort, Text und Adresse als fester Text oder mit Platzhaltern.</td></tr>
     <tr><td>4. Beispielnachricht</td><td>Eine echte Nachricht zum Ausprobieren. Die Live-Ansicht rechts zeigt sofort das Ergebnis.</td></tr>
   </table>
   <p class="hint">Auf der Regelseite steht unter jedem Feld eine kurze Erklärung, und oben lässt sich eine Legende aufklappen.</p>
@@ -116,6 +116,10 @@
   <h3>Von Hand senden</h3>
   <details><summary>Wie sende ich eine Meldung, ohne eine Regel anzulegen?</summary>
     <p>Über „Alarme" oder „Mitteilungen" im Menü. Stichwort, Text und Empfänger eintragen, auf der Bestätigungsseite prüfen und senden. Das geht für Mitteilungen und für Alarme und braucht das Recht „Von Hand an DIVERA senden".</p></details>
+  <details><summary>Kann ich einer Mitteilung eine Datei anhängen?</summary>
+    <p>Ja. Unter „Mitteilungen" beim Feld „Anhang" eine oder mehrere Dateien auswählen, zum Beispiel ein PDF. Ohne Auswahl geht die Mitteilung wie bisher ohne Anhang. Mit Anhang braucht die Löschgruppe den persönlichen Accesskey; benachrichtigt wird per Push, eine RIC wird nicht übertragen. Bei Alarmen gibt es keine Anhänge.</p></details>
+  <details><summary>Wie schickt eine Regel die Anhänge einer Mail mit?</summary>
+    <p>In der Regel bei „Anhänge aus der Mail" „Nur PDF-Dateien" oder „Alle Dateien" wählen; die Vorgabe ist „Keine Anhänge". Logos aus der Signatur werden nie mitgeschickt. Mit „Gegen die letzten Nachrichten prüfen" siehst du je Nachricht, welche Dateien mitgehen würden.</p></details>
   <details><summary>Gilt der Testmodus auch für „Alarme" und „Mitteilungen" im Menü?</summary>
     <p>Nein. Der Testmodus betrifft nur den automatischen Betrieb mit Regeln. Eine von Hand gesendete Meldung geht nach der Bestätigung immer wirklich an DIVERA.</p></details>
   <details><summary>Wo sehe ich Verbindungsprobleme und Fehlanmeldungen?</summary>

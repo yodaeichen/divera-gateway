@@ -1095,6 +1095,191 @@ with TestClient(app, base_url="http://testserver") as c:
     assert keep_send("k", alarm3)[0] and keep_send("k", hand[3][1])[0] and keep_send("k", {"title": "x"})[0]
     rules.httpx.post = keep3
     assert [u[0].rsplit("/", 1)[1] for u in seen_urls] == ["alarms", "news", "alarm"] and [u[1] for u in seen_urls] == [True, True, False]
+    # ---------- Anhänge ----------
+    from email.message import EmailMessage
+    from app import uploads
+    mime = EmailMessage()
+    mime["From"], mime["Subject"], mime["Date"] = "amt@stadt.example", "WG: Anordnung", "Fri, 13 Nov 2026 10:00:00 +0100"
+    mime.set_content("Anbei die Anordnung.")
+    mime.add_alternative("<p>Anbei die Anordnung.<img src='cid:logo1'></p>", subtype="html")
+    mime.get_payload()[1].add_related(b"\x89PNG-logo", maintype="image", subtype="png", cid="<logo1>", filename="logo.png")
+    mime.add_attachment(b"%PDF-1.4 anordnung", maintype="application", subtype="pdf", filename="Anordnung Hasenweg.pdf")
+    mime.add_attachment(b"PK-docx", maintype="application", subtype="vnd.openxmlformats-officedocument.wordprocessingml.document", filename="Plan.docx")
+    mime.add_attachment(b"\xff\xd8foto", maintype="image", subtype="jpeg", filename="baustelle.jpg")
+    mime.add_attachment(b"\x89PNG-sig", maintype="image", subtype="png", filename="image001.png", disposition="inline", cid="<sig1>")
+    found = sources.mail_attachments(mime.as_bytes())
+    assert [(f["name"], f["inline"]) for f in found] == [("Anordnung Hasenweg.pdf", False), ("Plan.docx", False), ("baustelle.jpg", False), ("image001.png", True)], found
+    assert found[0]["data"] == b"%PDF-1.4 anordnung" and found[0]["type"] == "application/pdf"
+    assert rules.choose_attachments("", found) == ([], [])
+    assert [f["name"] for f in rules.choose_attachments("pdf", found)[0]] == ["Anordnung Hasenweg.pdf"]
+    assert [f["name"] for f in rules.choose_attachments("all", found)[0]] == ["Anordnung Hasenweg.pdf", "Plan.docx", "baustelle.jpg"], "eingebettete Bilder der Signatur bleiben weg"
+    big = dict(found[0], name="riesig.pdf", size=rules.ATTACH_MAX_BYTES + 1)
+    many = [dict(found[0], name=f"teil{i}.pdf") for i in range(rules.ATTACH_MAX_COUNT + 1)]
+    assert rules.choose_attachments("pdf", [big]) == ([], [f"riesig.pdf (zu groß, {big['size'] // 1024} kB)"])
+    assert len(rules.choose_attachments("pdf", many)[0]) == rules.ATTACH_MAX_COUNT and "mehr als" in rules.choose_attachments("pdf", many)[1][0]
+    # Microsoft 365: Liste ohne Inhalt, Inhalt erst bei Bedarf
+    graph_calls = []
+    class _G:
+        def __init__(self, data): self.status_code, self._data = 200, data
+        def json(self): return self._data
+    def fake_graph(method, url, **kw):
+        graph_calls.append(url.rsplit("/", 1)[1])
+        if url.endswith("/attachments"):
+            return _G({"value": [{"@odata.type": "#microsoft.graph.fileAttachment", "id": "A1", "name": "AO.pdf", "contentType": "application/pdf", "size": 9, "isInline": False},
+                                 {"@odata.type": "#microsoft.graph.itemAttachment", "id": "A2", "name": "weitergeleitet", "size": 5}]})
+        return _G({"contentBytes": __import__("base64").b64encode(b"%PDF-graph").decode()})
+    keep_req, keep_tok = sources._request, sources._graph_token
+    sources._request, sources._graph_token = fake_graph, lambda cfg: "t"
+    try:
+        assert sources._lazy_graph({"mailbox": "x@y.de"}, {"id": "M1", "hasAttachments": False}) == []
+        gmsg = {"attachments": sources._lazy_graph({"mailbox": "x@y.de"}, {"id": "M1", "hasAttachments": True})}
+        assert not graph_calls and [a["name"] for a in sources.attachments_of(gmsg)] == ["AO.pdf"] and graph_calls == ["attachments"]
+        assert sources.attachments_of(gmsg) is gmsg["attachments"] and graph_calls == ["attachments"], "Liste nur einmal holen"
+        assert sources.attachment_bytes(gmsg["attachments"][0]) == b"%PDF-graph" and graph_calls == ["attachments", "A1"]
+    finally:
+        sources._request, sources._graph_token = keep_req, keep_tok
+
+    # Übertragungsweg: mit Anhängen immer die neuere Schnittstelle, Alarme bleiben unberührt
+    with m.SessionLocal() as db:
+        arule = m.Rule(tenant_id=1, name="AO", active=True, kind="news", push=True, attachments="pdf", ric="LZ1", ucr_ids="", group_ids="12",
+                       priority=False, extra_params="", match_from="", match_subject="Anordnung", match_body="", extract_regex="",
+                       require_regex=False, title_tpl="{subject}", text_tpl="Siehe Anhang", address_tpl="", stop=True, position=1)
+        route = rules.plan(arule)
+        assert route["route"] == "v2" and route["push"] is True and route["ntype"] == 3
+        assert any("neuere DIVERA-Schnittstelle" in n for n in route["notes"]) and any("RIC wird mit Anhängen nicht übertragen" in n for n in route["notes"])
+        assert rules.build_payload(arule, {"subject": "Anordnung"})["News"]["send_push"] is True
+        arule.kind = "alarm"
+        assert rules.plan(arule)["route"] == "v1" and rules.attach_mode(arule) == "", "Anhänge nur bei Mitteilungen"
+        arule.kind, arule.attachments = "news", ""
+        assert rules.plan(arule)["route"] == "v1", "ohne Anhänge bleibt alles wie bisher"
+        arule.attachments = "pdf"
+    # Hochladen: erst die Mitteilung, dann je Anhang ein Aufruf mit Titel und Beschreibung
+    posts = []
+    class _D:
+        def __init__(self, code, data): self.status_code, self._data, self.text = code, data, json.dumps(data)
+        def json(self): return self._data
+    answers = []
+    def fake_post(url, params=None, data=None, json=None, files=None, timeout=None):
+        posts.append({"url": url, "key": (params or {}).get("accesskey"), "data": data, "json": json, "files": files})
+        return answers.pop(0)
+    keep_post = rules.httpx.post
+    rules.httpx.post = fake_post
+    try:
+        news_payload = {"News": {"title": "AO", "text": "x", "notification_type": 2, "send_push": True}, "instructions": {}}
+        two = [dict(found[0], description="Anhang aus der Mail „WG: Anordnung“"), dict(found[2])]
+        answers[:] = [_D(200, {"success": True, "data": {"id": 4711}}), _D(200, {"success": True, "data": {}}), _D(200, {"success": True, "data": {}})]
+        ok_, det_ = keep_send("persoenlich456", news_payload, two)
+        assert ok_ and "Anordnung Hasenweg.pdf angehängt; baustelle.jpg angehängt" in det_, det_
+        assert [p["url"].split("/api/v2/")[1] for p in posts] == ["news", "news/attachment/4711", "news/attachment/4711"]
+        assert posts[1]["files"] == {"Attachment[upload]": ("Anordnung Hasenweg.pdf", b"%PDF-1.4 anordnung", "application/pdf")}
+        assert posts[1]["data"] == {"Attachment[title]": "Anordnung Hasenweg.pdf", "Attachment[description]": "Anhang aus der Mail „WG: Anordnung“"}
+        assert posts[2]["data"]["Attachment[description]"] == "baustelle.jpg" and {p["key"] for p in posts} == {"persoenlich456"}
+        posts.clear()
+        answers[:] = [_D(200, {"success": True, "data": {"id": 5}}), _D(413, {"success": False, "errors": ["zu groß"]})]
+        ok_, det_ = keep_send("k", news_payload, [found[0]])
+        assert not ok_ and "abgelehnt (HTTP 413" in det_ and len(posts) == 2, "Anhang abgelehnt = fehler, Mitteilung nicht doppelt"
+        answers[:] = [_D(200, {"success": True, "data": {}})]
+        ok_, det_ = keep_send("k", news_payload, [found[0]])
+        assert not ok_ and "keine ID zurückgegeben" in det_
+        assert keep_send("k", {"title": "v1"}, [found[0]]) == (False, "Anhänge lassen sich nur mit Mitteilungen über die neuere Schnittstelle senden.")
+    finally:
+        rules.httpx.post = keep_post
+
+    # Regel speichern: Vorgabe keine Anhänge, Auswahl wird übernommen
+    ATT = {"csrf": tok, "tenant_id": "1", "name": "Anordnung mit PDF", "position": "5", "source_id": "1", "kind": "news", "push": "1",
+           "match_subject": "Anordnung", "title_tpl": "{subject}", "text_tpl": "Siehe Anhang", "active": "on", "stop": "on"}
+    assert "Regel gespeichert" in c.post("/rules/save", data=ATT).text
+    with m.SessionLocal() as db:
+        att_rule = db.query(m.Rule).filter_by(name="Anordnung mit PDF").one()
+        assert att_rule.attachments == "", "ohne Auswahl keine Anhänge"
+        att_id = att_rule.id
+    form_page = c.get(f"/rules/{att_id}/edit").text
+    assert 'name="attachments"' in form_page and '<option value="" selected>Keine Anhänge</option>' in form_page
+    c.post("/rules/save", data=dict(ATT, id=str(att_id), attachments="pdf"))
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, att_id).attachments == "pdf"
+    assert '<option value="pdf" selected>' in c.get(f"/rules/{att_id}/edit").text and "mit Anhängen (nur PDF)" in c.get("/tenants/1").text
+    c.post("/rules/save", data=dict(ATT, id=str(att_id), attachments="boese"))
+    with m.SessionLocal() as db:
+        assert db.get(m.Rule, att_id).attachments == ""
+    # Prüfung gegen die letzten Nachrichten zeigt, was mitginge
+    sources.RECENT["m365"] = lambda cfg, count: [
+        {"from": "amt@stadt.example", "subject": "WG: Anordnung", "body": "x", "date": "", "ts": None, "ref": "1", "attachments": list(found)},
+        {"from": "amt@stadt.example", "subject": "Anordnung ohne Datei", "body": "x", "date": "", "ts": None, "ref": "2", "attachments": []}]
+    chk_att = c.post("/rules/check", data=dict(ATT, id=str(att_id), attachments="pdf")).text
+    assert "Anhänge: Anordnung Hasenweg.pdf" in chk_att and "ohne Anhang" in chk_att and "baustelle.jpg" not in chk_att
+    assert "Anhänge:" not in c.post("/rules/check", data=dict(ATT, id=str(att_id))).text
+
+    # Automatischer Betrieb: Testmodus zeigt die Dateien, scharf werden sie übertragen
+    seen_files = []
+    rules.send_divera = lambda key, payload, files=None: seen_files.append((key, payload, files)) or (True, 'HTTP 200: {"success":true} | Anhänge: ok')
+    try:
+        with m.SessionLocal() as db:
+            db.get(m.Rule, att_id).attachments = "pdf"; db.commit()
+            src1 = db.get(m.Source, 1)
+            assert rules.process_message(db, src1, {"from": "amt@stadt.example", "subject": "WG: Anordnung Test", "body": "x", "attachments": list(found)}) >= 1
+            log_t = db.query(m.Log).filter_by(subject="WG: Anordnung Test").one()
+            assert log_t.status == "test" and "Anhänge: Anordnung Hasenweg.pdf" in log_t.detail and not seen_files
+            src1.tenant.test_mode = False; db.commit()
+            rules.process_message(db, src1, {"from": "amt@stadt.example", "subject": "WG: Anordnung scharf", "body": "x", "attachments": list(found)})
+            key_, pay_, files_ = seen_files[-1]
+            assert key_ == "persoenlich456" and "News" in pay_ and [f["name"] for f in files_] == ["Anordnung Hasenweg.pdf"]
+            assert files_[0]["description"] == "Anhang aus der Mail „WG: Anordnung scharf“" and files_[0]["data"] == b"%PDF-1.4 anordnung"
+            rules.process_message(db, src1, {"from": "amt@stadt.example", "subject": "WG: Anordnung leer", "body": "x", "attachments": []})
+            assert seen_files[-1][2] is None and "keine passenden Anhänge" in db.query(m.Log).filter_by(subject="WG: Anordnung leer").one().detail
+            def broken_list():
+                raise RuntimeError("Graph-Fehler 503")
+            rules.process_message(db, src1, {"from": "amt@stadt.example", "subject": "WG: Anordnung kaputt", "body": "x", "attachments": broken_list})
+            assert "Anhänge konnten nicht gelesen werden" in db.query(m.Log).filter_by(subject="WG: Anordnung kaputt").one().detail and seen_files[-1][2] is None
+            src1.tenant.test_mode = True
+            db.get(m.Rule, att_id).active = False; db.commit()
+    finally:
+        rules.send_divera = keep_send
+
+    # Mitteilung von Hand mit Anhang: Datei bleibt bis zur Bestätigung liegen
+    sent_hand = []
+    rules.send_divera = lambda key, payload, files=None: sent_hand.append((key, payload, files)) or (True, 'HTTP 200: {"success":true} | Anhänge: AO.pdf angehängt')
+    try:
+        NEWSF = {"csrf": tok, "tenant_id": "1", "kind": "news", "notify": "default", "title": "Sperrung", "text": "Siehe Anhang", "grp": ["12"], "ric": "LZ1"}
+        assert 'enctype="multipart/form-data"' in c.get("/news?tenant=1").text and 'name="files"' in c.get("/news?tenant=1").text
+        assert 'name="files"' not in c.get("/alarms?tenant=1").text, "Anhänge nur bei Mitteilungen"
+        askf = c.post("/send", data=NEWSF, files=[("files", ("AO.pdf", b"%PDF-hand", "application/pdf"))]).text
+        token_ = re.search(r'name="upload" value="([\w-]+)"', askf).group(1)
+        assert "Wirklich an DIVERA senden?" in askf and "AO.pdf (1 kB)" in askf and "eine RIC wird nicht übertragen" in askf and not sent_hand
+        assert uploads.load(token_, 999) == [], "fremde Benutzer kommen nicht an die Datei"
+        editf = c.post("/send", data=dict(NEWSF, upload=token_, edit="1")).text
+        assert "Angehängt: <strong>AO.pdf</strong>" in editf and f'value="{token_}"' in editf
+        donef = c.post("/send", data=dict(NEWSF, upload=token_, confirm="ja")).text
+        key_h, pay_h, files_h = sent_hand[-1]
+        assert "an DIVERA gesendet" in donef and key_h == "persoenlich456" and pay_h["News"]["send_push"] is True and pay_h["News"]["group"] == [12]
+        assert [(f["name"], f["data"]) for f in files_h] == [("AO.pdf", b"%PDF-hand")] and files_h[0]["description"] == "Anhang zur Mitteilung „Sperrung“"
+        assert uploads.load(token_, 1) == [] and not os.path.isdir(os.path.join(uploads.DIR, token_)), "nach dem Senden gelöscht"
+        n_before = len(sent_hand)
+        c.post("/send", data=dict(NEWSF, confirm="ja"))
+        assert sent_hand[-1][2] is None and len(sent_hand) == n_before + 1, "ohne Datei ohne Anhang"
+        dropped = c.post("/send", data=NEWSF, files=[("files", ("AO.pdf", b"%PDF", "application/pdf"))]).text
+        tok_drop = re.search(r'name="upload" value="([\w-]+)"', dropped).group(1)
+        assert "Anhänge" not in c.post("/send", data=dict(NEWSF, upload=tok_drop, drop_files="on")).text.split("Daten an die DIVERA-API")[0].split("<table")[1]
+        keep_max = rules.ATTACH_MAX_BYTES
+        rules.ATTACH_MAX_BYTES = 10
+        assert "ist zu groß" in c.post("/send", data=NEWSF, files=[("files", ("gross.pdf", b"x" * 11, "application/pdf"))]).text
+        rules.ATTACH_MAX_BYTES = keep_max
+        too_many = [("files", (f"{i}.pdf", b"%PDF", "application/pdf")) for i in range(rules.ATTACH_MAX_COUNT + 1)]
+        assert f"Höchstens {rules.ATTACH_MAX_COUNT} Anhänge" in c.post("/send", data=NEWSF, files=too_many).text
+        nokey = c.post("/send", data=dict(NEWSF, tenant_id="2", grp=[]), files=[("files", ("AO.pdf", b"%PDF", "application/pdf"))]).text
+        assert "fehlt bei dieser Löschgruppe der persönliche Accesskey" in nokey
+        alarm_f = c.post("/send", data=dict(MAN, confirm="ja"), files=[("files", ("AO.pdf", b"%PDF", "application/pdf"))]).text
+        assert "an DIVERA gesendet" in alarm_f and sent_hand[-1][2] is None and "News" not in sent_hand[-1][1], "Alarm ignoriert Dateien"
+        os.utime(os.path.join(uploads.DIR, tok_drop) if os.path.isdir(os.path.join(uploads.DIR, tok_drop)) else uploads.DIR, (0, 0))
+        old_tok = uploads.save([{"name": "alt.pdf", "data": b"%PDF"}], 1)
+        os.utime(os.path.join(uploads.DIR, old_tok), (0, 0))
+        uploads.prune()
+        assert not os.path.isdir(os.path.join(uploads.DIR, old_tok)), "Liegengebliebenes wird aufgeräumt"
+        assert uploads.clean_name("../../etc/passwd") == "passwd" and uploads.clean_name('a<b>"c.pdf') == "a_b__c.pdf" and uploads.load("../x", 1) == []
+    finally:
+        rules.send_divera = keep_send
+    rules.send_divera = lambda key, payload: hand.append((key, payload)) or (True, 'HTTP 200: {"success":true}')
+
     rules.send_divera = lambda key, payload: (False, "HTTP 500: kaputt")
     failed_send = c.post("/send", data=dict(MAN, confirm="ja")).text
     assert "Senden fehlgeschlagen" in failed_send and 'value="Probe {subject}"' in failed_send

@@ -4,10 +4,12 @@ Jeder Poller bekommt (config, state) und liefert (nachrichten, neuer_state).
 Beim ersten Lauf wird nur der aktuelle Stand gemerkt; alte Mails lösen nichts aus.
 Nachricht: {"id", "from", "subject", "body", "date", "ts" (datetime, UTC)}
 """
+import base64
 import datetime as dt
 import email
 import html
 import imaplib
+import os
 import re
 import time
 from email import policy
@@ -17,6 +19,7 @@ from urllib.parse import quote
 import httpx
 
 GRAPH = "https://graph.microsoft.com/v1.0"
+ATTACH_MAX_BYTES = int(float(os.environ.get("ATTACH_MAX_MB", "10")) * 1024 * 1024)  # größere Anhänge werden nicht geladen
 MAX_PER_POLL = 50
 PAGE_SIZE = 25  # Listeneinträge je Antwort von Microsoft (ohne Text); weitere Seiten werden nachgeladen
 RETRY_STATUS = {429, 502, 503, 504}
@@ -198,7 +201,7 @@ def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
         "$filter": f"receivedDateTime ge {state['since']}",
         "$orderby": "receivedDateTime asc",
         "$top": str(PAGE_SIZE),
-        "$select": "id,internetMessageId,subject,from,bodyPreview,receivedDateTime",
+        "$select": "id,internetMessageId,subject,from,bodyPreview,receivedDateTime,hasAttachments",
     })
     seen = set(state.get("seen") or [])
     legacy = "seen" not in state  # Stand aus einer Version vor 1.28: was genau zum gemerkten Zeitpunkt einging, gilt als gelesen
@@ -217,7 +220,7 @@ def poll_m365(cfg: dict, state: dict) -> tuple[list[dict], dict]:
             "from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
             "subject": item.get("subject") or "",
             "body": _graph_body(cfg, item),
-            "date": received, "ts": ts,
+            "date": received, "ts": ts, "attachments": _lazy_graph(cfg, item),
         })
         if received and received > newest:
             newest, at_newest = received, [key]
@@ -285,6 +288,69 @@ def _parse_mail(raw: bytes) -> tuple[str, str, str, dt.datetime]:
     return parseaddr(str(mail.get("From", "")))[1], str(mail.get("Subject", "")), str(body).strip(), ts
 
 
+# ---------- Anhänge ----------
+# Ein Anhang ist ein dict mit name, type, size und inline; die Daten stehen in "data" (bytes) oder werden über "fetch"
+# erst bei Bedarf geholt (Microsoft 365), damit nur übertragen wird, was eine Regel wirklich mitschicken soll.
+
+def mail_attachments(raw: bytes) -> list[dict]:
+    """Die Dateianhänge einer Roh-Mail (IMAP). Eingebettete Bilder, etwa Logos in der Signatur, gelten als inline."""
+    mail = email.message_from_bytes(raw, policy=policy.default)
+    found = []
+    for part in mail.iter_attachments():
+        name = part.get_filename()
+        if not name or part.get_content_maintype() == "multipart" or part.get_content_type() == "message/rfc822":
+            continue
+        data = part.get_payload(decode=True) or b""
+        inline = part.get_content_disposition() == "inline" or bool(part.get("Content-ID") and part.get_content_maintype() == "image")
+        found.append({"name": str(name)[:200], "type": part.get_content_type(), "size": len(data), "inline": inline,
+                      "data": data if len(data) <= ATTACH_MAX_BYTES else None})
+    return found
+
+
+def _graph_attachments(cfg: dict, graph_id: str) -> list[dict]:
+    """Liste der Dateianhänge einer Nachricht in Microsoft 365, ohne Inhalt; der Inhalt wird je Anhang nachgeladen."""
+    headers = {"Authorization": f"Bearer {_graph_token(cfg)}"}
+    base = f"{GRAPH}/users/{cfg['mailbox']}/messages/{quote(graph_id, safe='')}/attachments"
+    resp = _request("GET", base, params={"$select": "id,name,contentType,size,isInline"}, headers=headers)
+    if resp.status_code != 200:
+        raise _graph_error(cfg, resp)
+    found = []
+    for item in resp.json().get("value", []):
+        if item.get("@odata.type", "#microsoft.graph.fileAttachment") != "#microsoft.graph.fileAttachment":
+            continue  # angehängte Mails und Verweise auf OneDrive sind keine Dateien
+        def fetch(aid=item["id"]) -> bytes:
+            got = _request("GET", f"{base}/{quote(aid, safe='')}", headers={"Authorization": f"Bearer {_graph_token(cfg)}"})
+            if got.status_code != 200:
+                raise _graph_error(cfg, got)
+            return base64.b64decode(got.json().get("contentBytes") or "")
+        found.append({"name": (item.get("name") or "Anhang")[:200], "type": item.get("contentType") or "application/octet-stream",
+                      "size": int(item.get("size") or 0), "inline": bool(item.get("isInline")), "fetch": fetch})
+    return found
+
+
+def _lazy_graph(cfg: dict, item: dict):
+    """Anhänge einer Graph-Nachricht erst bei Bedarf abfragen; ohne Anhänge gar nicht."""
+    if not item.get("hasAttachments"):
+        return []
+    graph_id = item["id"]
+    return lambda: _graph_attachments(cfg, graph_id)
+
+
+def attachments_of(msg: dict) -> list[dict]:
+    """Die Anhänge einer Nachricht. Bei Microsoft 365 wird die Liste beim ersten Aufruf geholt und gemerkt."""
+    found = msg.get("attachments") or []
+    if callable(found):
+        found = found()
+        msg["attachments"] = found
+    return found
+
+
+def attachment_bytes(item: dict) -> bytes:
+    if item.get("data") is None and item.get("fetch"):
+        item["data"] = item["fetch"]()
+    return item.get("data") or b""
+
+
 def poll_imap(cfg: dict, state: dict) -> tuple[list[dict], dict]:
     conn = _imap_connect(cfg)
     try:
@@ -314,7 +380,7 @@ def poll_imap(cfg: dict, state: dict) -> tuple[list[dict], dict]:
             if rewind is not None and ts < rewind:
                 continue
             messages.append({"id": f"{validity}:{uid}", "from": sender, "subject": subject, "body": body,
-                             "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": ts})
+                             "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": ts, "attachments": mail_attachments(data[0][1])})
         return messages, {"uidvalidity": validity, "last_uid": last}
     finally:
         try:
@@ -351,13 +417,14 @@ def fetch_m365(cfg: dict, ref: str) -> dict:
     """Holt eine einzelne Nachricht vollständig, als Vorlage für einen Regelvorschlag."""
     headers = {"Authorization": f"Bearer {_graph_token(cfg)}", "Prefer": 'outlook.body-content-type="text"'}
     resp = _request("GET", f"{GRAPH}/users/{cfg['mailbox']}/messages/{quote(ref, safe='')}",
-                     params={"$select": "internetMessageId,subject,from,body,receivedDateTime"}, headers=headers)
+                     params={"$select": "id,internetMessageId,subject,from,body,receivedDateTime,hasAttachments"}, headers=headers)
     if resp.status_code != 200:
         raise RuntimeError(f"Graph-Fehler {resp.status_code} beim Laden der Nachricht.")
     item = resp.json()
     return {"id": item.get("internetMessageId") or ref, "date": item.get("receivedDateTime", ""),
             "from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""),
-            "subject": item.get("subject") or "", "body": ((item.get("body") or {}).get("content") or "").strip()}
+            "subject": item.get("subject") or "", "body": ((item.get("body") or {}).get("content") or "").strip(),
+            "attachments": _lazy_graph(cfg, dict(item, id=item.get("id") or ref))}
 
 
 def fetch_imap(cfg: dict, ref: str) -> dict:
@@ -371,7 +438,8 @@ def fetch_imap(cfg: dict, ref: str) -> dict:
         sender, subject, body, ts = _parse_mail(data[0][1])
         validity = (conn.response("UIDVALIDITY")[1] or [b"0"])[0]
         validity = validity.decode() if isinstance(validity, bytes) else str(validity)
-        return {"id": f"{validity}:{ref}", "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "from": sender, "subject": subject, "body": body}
+        return {"id": f"{validity}:{ref}", "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "from": sender, "subject": subject, "body": body,
+                "attachments": mail_attachments(data[0][1])}
     finally:
         try:
             conn.logout()
@@ -382,12 +450,12 @@ def fetch_imap(cfg: dict, ref: str) -> dict:
 def recent_m365(cfg: dict, count: int) -> list[dict]:
     """Die neuesten Nachrichten mit vollem Text, um eine Regel gegen echte Eingänge zu prüfen."""
     raw = _graph_messages(cfg, {"$top": str(count), "$orderby": "receivedDateTime desc",
-                                "$select": "id,subject,from,receivedDateTime,bodyPreview"}, limit=count)
+                                "$select": "id,subject,from,receivedDateTime,bodyPreview,hasAttachments"}, limit=count)
     result = []
     for item in raw:
         received = item.get("receivedDateTime", "")
         result.append({"from": ((item.get("from") or {}).get("emailAddress") or {}).get("address", ""), "subject": item.get("subject") or "",
-                       "body": _graph_body(cfg, item), "date": received, "ref": item.get("id", ""),
+                       "body": _graph_body(cfg, item), "date": received, "ref": item.get("id", ""), "attachments": _lazy_graph(cfg, item),
                        "ts": _naive_utc(dt.datetime.fromisoformat(received.replace("Z", "+00:00"))) if received else None})
     return result
 
@@ -402,7 +470,7 @@ def recent_imap(cfg: dict, count: int) -> list[dict]:
                 continue
             sender, subject, body, ts = _parse_mail(data[0][1])
             result.append({"from": sender, "subject": subject, "body": body, "date": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": _naive_utc(ts),
-                           "ref": str(uid)})
+                           "ref": str(uid), "attachments": mail_attachments(data[0][1])})
     finally:
         try:
             conn.logout()

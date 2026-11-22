@@ -285,10 +285,17 @@ DIVERA begrenzt: Stichwort 50 Zeichen (FREE 30), Text 1000, Adresse 200. Die Liv
 | Alarm | `api/alarm` | Alarm-Accesskey |
 | Mitteilung mit Push | `api/alarm` | Alarm-Accesskey |
 | Mitteilung ohne Push | `api/v2/news` | Persönlicher Accesskey |
+| Mitteilung mit Anhängen | `api/v2/news`, danach `api/v2/news/attachment/{id}` je Datei | Persönlicher Accesskey |
 
 Bei „ohne Push" gelten die Regeln der v2-Schnittstelle: Eine RIC wird nicht übertragen; sind Gruppen und Personen
 zugleich angekreuzt, zählen nur die Personen; ist nichts angekreuzt, geht die Mitteilung an alle Mitglieder der Einheit.
 Die Live-Ansicht weist jeweils darauf hin.
+
+**Anhänge aus der Mail:** Vorgabe ist *Keine Anhänge*. Mit *Nur PDF-Dateien* oder *Alle Dateien* schickt eine
+Mitteilungs-Regel die Dateien der Mail mit; eingebettete Bilder wie Logos in der Signatur gehen nie mit. Je Mitteilung
+höchstens 5 Dateien zu je 10 MB (`ATTACH_MAX_COUNT`, `ATTACH_MAX_MB`). Mit Anhängen gelten die Regeln der
+v2-Schnittstelle wie bei „ohne Push", benachrichtigt wird per Push. „Gegen die letzten Nachrichten prüfen" zeigt je
+Nachricht, welche Dateien mitgehen würden. Für Alarme gibt es keine Anhänge.
 
 ### 4. Beispielnachricht und Live-Ansicht
 
@@ -309,6 +316,9 @@ Der Testmodus der Löschgruppe gilt hier nicht. Nötig ist das Recht „Von Hand
 Bei der Benachrichtigung gibt es zwei Möglichkeiten: „Wie in DIVERA eingestellt" nutzt die ältere Schnittstelle und
 kennt RIC. „Nur über diese Wege" lässt Push, SMS, Sprachanruf, E-Mail und Pager einzeln ankreuzen; das läuft über
 `api/v2/news` bzw. `api/v2/alarms`, braucht den persönlichen Accesskey und überträgt keine RIC.
+
+Bei Mitteilungen lassen sich Dateien anhängen (Vorgabe: keine). Mit Anhang geht die Mitteilung immer über
+`api/v2/news` mit dem persönlichen Accesskey; bei „Wie in DIVERA eingestellt" wird dann per Push benachrichtigt.
 
 ## Systemprotokoll
 
@@ -436,6 +446,8 @@ In `/etc/divera-gateway.env` (Proxmox) bzw. `.env` (Docker):
   Testsendung an sich selbst prüfen.
 - In DIVERA 24/7 FREE überträgt die Alarm-Schnittstelle nur das Stichwort, und es ist nur ein Alarm je fünf Minuten möglich.
 - Es gibt keine Redundanz: Fällt der Container aus, wird nichts übergeben.
+- Anhänge: Die DIVERA-Dokumentation nennt keine Größengrenze und keine erlaubten Dateitypen. Lehnt DIVERA einen Anhang
+  ab, ist die Mitteilung schon angelegt und erscheint ohne diese Datei; das Protokoll zeigt den Fehler.
 
 ## Kein Ersatz für die primäre Alarmierung
 

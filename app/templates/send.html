@@ -16,7 +16,7 @@
 </div>
 
 {% if tenant %}
-<form method="post" action="/send">
+<form method="post" action="/send" enctype="multipart/form-data">
 <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="tenant_id" value="{{ tenant.id }}"><input type="hidden" name="kind" value="{{ mode }}">
 <div class="card">
   <h2>{{ 'Neuer Alarm' if mode == 'alarm' else 'Neue Mitteilung' }} an {{ tenant.name }}</h2>
@@ -27,6 +27,14 @@
   <p class="hint">Höchstens 1000 Zeichen.</p>
   <label>Adresse (optional)</label><input type="text" name="address" value="{{ v.get('address', '') }}" maxlength="200">
   <p class="hint">Einsatzort für Karte und Navigation.</p>
+  {% if mode == 'news' %}
+  <label>Anhang (optional)</label>
+  {% if v.get('files') %}<p>Angehängt: <strong>{{ v.files|join(', ') }}</strong></p>
+  <input type="hidden" name="upload" value="{{ v.upload }}">
+  <label class="check"><input type="checkbox" name="drop_files"> Anhänge entfernen</label>{% endif %}
+  <input type="file" name="files" multiple>
+  <p class="hint">Ohne Auswahl geht die Mitteilung ohne Anhang. Höchstens {{ attach_limits.count }} Dateien zu je {{ attach_limits.mb }} MB, zum Beispiel ein PDF. Mit Anhang geht die Mitteilung über die neuere DIVERA-Schnittstelle: Die Löschgruppe braucht dafür den persönlichen Accesskey, eine RIC wird nicht übertragen, Empfänger wählst du über Gruppen oder Personen.</p>
+  {% endif %}
 </div>
 
 <div class="card">

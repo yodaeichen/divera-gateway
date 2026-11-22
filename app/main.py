@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as m
-from . import access, backup, events, mailer, notify, push, rules, sources, suggest, syslog, worker
+from . import access, backup, events, mailer, notify, uploads, push, rules, sources, suggest, syslog, worker
 from . import security as sec
 from .version import VERSION
 
@@ -60,6 +60,8 @@ app.add_middleware(SessionMiddleware, secret_key=sec.SESSION_SECRET, session_coo
 app.mount("/static", StaticFiles(directory=os.path.join(BASE, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE, "templates"))
 templates.env.globals["version"] = VERSION
+templates.env.globals["attach_modes"] = rules.ATTACH_MODES
+templates.env.globals["attach_limits"] = {"count": rules.ATTACH_MAX_COUNT, "mb": round(rules.ATTACH_MAX_BYTES / 1024 / 1024, 1)}
 templates.env.filters["localtime"] = lambda value: (
     value.replace(tzinfo=dt.timezone.utc).astimezone(TZ).strftime("%d.%m.%Y %H:%M:%S") if value else "nie")
 
@@ -513,6 +515,36 @@ def events_home(request: Request, tenant: int | None = None, db: Session = Depen
     return page(request, "events_home.html", user, tenants=visible_tenants(db, user))
 
 
+async def collect_uploads(form, user: m.User, kind: str) -> tuple[list[dict], str, str]:
+    """Anhänge aus dem Sendeformular: schon abgelegte (Kennzeichen „upload“) plus neu ausgewählte Dateien.
+    Gibt die Dateien, das Kennzeichen der Ablage und eine Fehlermeldung zurück."""
+    token = text(form, "upload", 80)
+    if "drop_files" in form or kind != "news":   # Anhänge gibt es nur bei Mitteilungen
+        uploads.remove(token)
+        return [], "", ""
+    files = uploads.load(token, user.id) if token else []
+    fresh = []
+    for item in form.getlist("files"):
+        if not hasattr(item, "read") or not getattr(item, "filename", ""):
+            continue
+        data = await item.read()
+        if not data:
+            continue
+        if len(data) > rules.ATTACH_MAX_BYTES:
+            return files, token, (f"„{uploads.clean_name(item.filename)}“ ist zu groß "
+                                  f"(höchstens {round(rules.ATTACH_MAX_BYTES / 1024 / 1024, 1)} MB je Datei).")
+        fresh.append({"name": uploads.clean_name(item.filename), "type": getattr(item, "content_type", "") or "application/octet-stream",
+                      "data": data})
+    if not fresh:
+        return files, token if files else "", ""
+    if len(files) + len(fresh) > rules.ATTACH_MAX_COUNT:
+        return files, token, f"Höchstens {rules.ATTACH_MAX_COUNT} Anhänge je Mitteilung."
+    combined = [{"name": f["name"], "type": f["type"], "data": f["data"]} for f in files] + fresh
+    uploads.remove(token)
+    token = uploads.save(combined, user.id)
+    return uploads.load(token, user.id), token, ""
+
+
 @app.post("/send")
 async def send_now(request: Request, db: Session = Depends(get_db), user: m.User = Depends(allow("send"))):
     """Sendet eine von Hand geschriebene Mitteilung oder einen Alarm. Zwei Schritte: Bestätigungsseite, dann Senden."""
@@ -521,12 +553,18 @@ async def send_now(request: Request, db: Session = Depends(get_db), user: m.User
     rule = manual_rule(form, tenant)
     known = {name for name, _ in rules.CHANNELS}
     channels = [c for c in form.getlist("channel") if c in known] if form.get("notify") == "custom" else None
+    files, token, error = await collect_uploads(form, user, rule.kind)
     values = {"kind": rule.kind, "notify": "custom" if channels is not None else "default", "channels": channels or [],
               "priority": rule.priority, "ric": rule.ric,
               "title": rule.title_tpl, "text": rule.text_tpl, "address": rule.address_tpl,
-              "ucr": [int(i) for i in rules.id_list(rule.ucr_ids)], "grp": [int(i) for i in rules.id_list(rule.group_ids)]}
-    error = ""
-    if not tenant.active:
+              "ucr": [int(i) for i in rules.id_list(rule.ucr_ids)], "grp": [int(i) for i in rules.id_list(rule.group_ids)],
+              "upload": token, "files": [f["name"] for f in files]}
+    if error:
+        pass
+    elif files and not tenant.accesskey_user_enc:
+        error = ("Anhänge gehen nur über die neuere DIVERA-Schnittstelle. Dafür fehlt bei dieser Löschgruppe der persönliche Accesskey "
+                 "(„Löschgruppe bearbeiten“). Ohne Anhang lässt sich die Mitteilung senden.")
+    elif not tenant.active:
         error = "Diese Löschgruppe ist inaktiv."
     elif not rule.title_tpl:
         error = "Bitte ein Stichwort eintragen."
@@ -535,17 +573,33 @@ async def send_now(request: Request, db: Session = Depends(get_db), user: m.User
     mode = rule.kind
     if error or "edit" in form:
         return send_page(request, user, db, tenant, mode=mode, v=values, error=error)
+    if files and channels is None:
+        channels = ["push"]   # mit Anhang nur über v2: dort werden die Benachrichtigungswege ausdrücklich angegeben
     data = rules.manual(rule, channels)
+    if files:
+        data["files"] = [f"{f['name']} ({max(1, f['size'] // 1024)} kB)" for f in files]
+        if values["notify"] == "default":
+            data["plan"]["notes"].insert(0, "Mit Anhang geht die Mitteilung über die neuere DIVERA-Schnittstelle: benachrichtigt wird per "
+                                            "Push-Nachricht in der App, eine RIC wird nicht übertragen.")
     directory = directory_of(tenant)
     def names(kind: str, ids: str) -> list[str]:
         lookup = {str(entry["id"]): entry["name"] for entry in directory[kind]}
         return [lookup.get(i, f"ID {i}") for i in rules.id_list(ids)]
     if form.get("confirm") != "ja":
-        fields = [(k, v) for k, v in form.multi_items() if k not in ("csrf", "confirm", "edit") and isinstance(v, str)]
+        fields = [(k, v) for k, v in form.multi_items() if k not in ("csrf", "confirm", "edit", "upload", "drop_files") and isinstance(v, str)]
+        if token:
+            fields.append(("upload", token))
         return page(request, "rule_send_confirm.html", user, tenant=tenant, rule=rule, data=data, fields=fields, manual=True,
                     persons=names("persons", rule.ucr_ids), groups=names("groups", rule.group_ids))
-    ok, detail = await asyncio.to_thread(rules.send_divera, rules.key_for(tenant, data["payload"]), data["payload"])
+    if files:
+        for item in files:
+            item["description"] = f"Anhang zur Mitteilung „{rules.title_of(data['payload'])}“"
+        ok, detail = await asyncio.to_thread(rules.send_divera, rules.key_for(tenant, data["payload"]), data["payload"], files)
+    else:
+        ok, detail = await asyncio.to_thread(rules.send_divera, rules.key_for(tenant, data["payload"]), data["payload"])
     detail += rules.refusal_hint(tenant, data["payload"], detail)
+    if ok and token:
+        uploads.remove(token)
     db.add(m.Log(tenant_id=tenant.id, tenant_name=tenant.name, source_name="Meldung von Hand", rule_name="",
                  sender=user.username, subject=rules.title_of(data["payload"])[:300], status="gesendet" if ok else "fehler",
                  detail=f"{'Alarm' if rule.kind == 'alarm' else 'Mitteilung'} | {detail} | ausgelöst von {user.username}"[:2000]))
@@ -894,6 +948,7 @@ def apply_rule_form(rule: m.Rule, form, db: Session) -> str:
     rule.name = text(form, "name", 120) or "Regel"
     rule.active, rule.priority = "active" in form, "priority" in form
     rule.push = form.get("push") != "0"
+    rule.attachments = form.get("attachments") if form.get("attachments") in ("pdf", "all") else ""  # Vorgabe: keine Anhänge
     rule.require_regex, rule.stop = "require_regex" in form, "stop" in form
     rule.kind = "alarm" if form.get("kind") == "alarm" else "news"  # Alarm nur bei ausdrücklicher Auswahl
     try:
@@ -994,17 +1049,30 @@ async def rule_check(request: Request, db: Session = Depends(get_db), user: m.Us
         except Exception as exc:
             error = f"Die Nachrichten von „{source.name}“ konnten nicht geladen werden ({type(exc).__name__}: {str(exc)[:200]})."
         else:
-            rows = []
-            for msg in recent:
-                data = rules.preview(rule, msg)
-                failed = [c["label"] for c in data["conditions"] if not c["ok"]]
-                if data["require_regex"] and any(not e["ok"] for e in data["expressions"]):
-                    failed.append("Ausdruck")
-                rows.append({"ts": msg["ts"], "from": msg["from"], "subject": msg["subject"], "match": data["match"],
-                             "title": data["fields"][0]["value"], "failed": failed})
-            check = {"source": source.name, "rows": rows, "hits": sum(1 for r in rows if r["match"])}
+            rows = await asyncio.to_thread(check_rows, rule, recent)
+            check = {"source": source.name, "rows": rows, "hits": sum(1 for r in rows if r["match"]), "files": bool(rules.attach_mode(rule))}
     return rule_page(request, user, tenant, rule, sample=sample, result=evaluate(rule, sample) if sample and not error else None,
                      error=error, check=check)
+
+
+def check_rows(rule: m.Rule, recent: list[dict]) -> list[dict]:
+    """Wertet die Regel gegen die letzten Nachrichten aus; mit Anhängen auch, welche Dateien mitgehen würden."""
+    rows = []
+    for msg in recent:
+        data = rules.preview(rule, msg)
+        failed = [c["label"] for c in data["conditions"] if not c["ok"]]
+        if data["require_regex"] and any(not e["ok"] for e in data["expressions"]):
+            failed.append("Ausdruck")
+        files, skipped = [], []
+        if data["match"] and rules.attach_mode(rule):
+            try:
+                chosen, skipped = rules.choose_attachments(rules.attach_mode(rule), sources.attachments_of(msg))
+                files = [item["name"] for item in chosen]
+            except Exception as exc:
+                skipped = [f"Anhänge nicht lesbar ({type(exc).__name__})"]
+        rows.append({"ts": msg["ts"], "from": msg["from"], "subject": msg["subject"], "match": data["match"],
+                     "title": data["fields"][0]["value"], "failed": failed, "files": files, "skipped": skipped})
+    return rows
 
 
 @app.post("/rules/preview")

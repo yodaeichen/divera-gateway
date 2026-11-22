@@ -21,6 +21,10 @@ DIVERA_PULL_URL = os.environ.get("DIVERA_PULL_URL", "https://app.divera247.com/a
 ARRAY_KEYS = ("group_ids", "cluster_ids", "user_cluster_relation_ids", "ucr", "vehicle_ids")
 RECIPIENT_KEYS = ("ric", "group_ids", "user_cluster_relation_ids", "ucr", "cluster_ids", "vehicle", "vehicle_ids", "person", "alarmcode_id")
 LIMITS = {"title": 50, "text": 1000, "address": 200}
+# Anhänge: werden nach dem Anlegen der Mitteilung einzeln über api/v2/news/attachment/{id} hochgeladen
+ATTACH_MODES = [("", "Keine Anhänge"), ("pdf", "Nur PDF-Dateien"), ("all", "Alle Dateien")]
+ATTACH_MAX_COUNT = int(os.environ.get("ATTACH_MAX_COUNT", "5"))
+ATTACH_MAX_BYTES = int(float(os.environ.get("ATTACH_MAX_MB", "10")) * 1024 * 1024)
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
 
@@ -176,6 +180,32 @@ def wants_push(rule: m.Rule) -> bool:
     return rule.push is None or bool(rule.push)
 
 
+def attach_mode(rule: m.Rule) -> str:
+    """Anhänge gibt es nur bei Mitteilungen; bei Alarmen ist die Einstellung ohne Wirkung."""
+    mode = getattr(rule, "attachments", "") or ""
+    return mode if rule.kind == "news" and mode in ("pdf", "all") else ""
+
+
+def choose_attachments(mode: str, items: list[dict]) -> tuple[list[dict], list[str]]:
+    """Wählt aus den Anhängen einer Mail die aus, die mitgehen. Gibt die Auswahl und Hinweise zu Ausgelassenem zurück."""
+    chosen, skipped = [], []
+    if not mode:
+        return chosen, skipped
+    for item in items:
+        is_pdf = item["type"] == "application/pdf" or item["name"].lower().endswith(".pdf")
+        if mode == "pdf" and not is_pdf:
+            continue
+        if item.get("inline") and not is_pdf and item["type"].startswith("image/"):
+            continue  # eingebettete Bilder wie Logos in der Signatur
+        if item["size"] > ATTACH_MAX_BYTES:
+            skipped.append(f"{item['name']} (zu groß, {item['size'] // 1024} kB)")
+        elif len(chosen) >= ATTACH_MAX_COUNT:
+            skipped.append(f"{item['name']} (mehr als {ATTACH_MAX_COUNT} Anhänge)")
+        else:
+            chosen.append(item)
+    return chosen, skipped
+
+
 def plan(rule: m.Rule) -> dict:
     """Legt fest, über welche DIVERA-Schnittstelle eine Regel sendet und wen sie damit erreicht.
 
@@ -185,9 +215,13 @@ def plan(rule: m.Rule) -> dict:
     """
     persons, groups, ric = id_list(rule.ucr_ids), id_list(rule.group_ids), (rule.ric or "").strip()
     push = wants_push(rule) or rule.kind != "news"
-    if rule.kind != "news" or push:
+    files = attach_mode(rule)
+    if rule.kind != "news" or (push and not files):
         return {"route": "v1", "push": push, "ntype": None, "audience": "", "notes": []}
     notes = []
+    if files and push:
+        notes.append("Mit Anhängen geht die Mitteilung über die neuere DIVERA-Schnittstelle. Dafür braucht die Löschgruppe den "
+                     "persönlichen Accesskey; benachrichtigt wird per Push-Nachricht in der App.")
     if persons:
         ntype, audience = 4, "nur die angekreuzten Personen"
         if groups:
@@ -197,7 +231,8 @@ def plan(rule: m.Rule) -> dict:
     else:
         ntype, audience = 2, "alle Mitglieder der Einheit"
     if ric:
-        notes.append("Die RIC wird bei „ohne Push“ nicht übertragen. Kreuze stattdessen Gruppen oder Personen an.")
+        notes.append(("Die RIC wird mit Anhängen nicht übertragen." if push else "Die RIC wird bei „ohne Push“ nicht übertragen.")
+                     + " Kreuze stattdessen Gruppen oder Personen an.")
     if (rule.extra_params or "").strip():
         notes.append("„Weitere API-Parameter“ werden bei diesem Übertragungsweg nicht mitgeschickt.")
     return {"route": "v2", "push": push, "ntype": ntype, "audience": audience, "notes": notes}
@@ -382,9 +417,40 @@ def manual(rule: m.Rule, channels: list[str] | None = None) -> dict:
             "has_recipient": is_v2(payload) or any(payload.get(key) for key in RECIPIENT_KEYS)}
 
 
-def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
+def upload_attachments(accesskey: str, news_id, files: list[dict]) -> tuple[bool, str]:
+    """Lädt Anhänge zu einer schon angelegten Mitteilung hoch, einen je Aufruf (POST api/v2/news/attachment/{id})."""
+    results, ok_all = [], True
+    for item in files:
+        data = item["data"] if item.get("data") is not None else sources_bytes(item)
+        fields = {"Attachment[title]": item["name"][:200], "Attachment[description]": (item.get("description") or item["name"])[:500]}
+        try:
+            resp = httpx.post(f"{DIVERA_NEWS_URL}/attachment/{news_id}", params={"accesskey": accesskey}, data=fields,
+                              files={"Attachment[upload]": (item["name"], data, item.get("type") or "application/octet-stream")}, timeout=60)
+            good = resp.status_code in (200, 201)
+            try:
+                if resp.json().get("success") is False:
+                    good = False
+            except (ValueError, AttributeError):
+                pass
+            results.append(f"{item['name']} " + ("angehängt" if good else f"abgelehnt (HTTP {resp.status_code}: {resp.text[:150]})"))
+        except Exception as exc:
+            good = False
+            results.append(f"{item['name']} nicht übertragen ({type(exc).__name__}: {str(exc)[:120]})")
+        ok_all = ok_all and good
+    return ok_all, "Anhänge: " + "; ".join(results)
+
+
+def sources_bytes(item: dict) -> bytes:
+    from . import sources   # spät laden, um eine Kreisabhängigkeit zu vermeiden
+    return sources.attachment_bytes(item)
+
+
+def send_divera(accesskey: str, payload: dict, files: list[dict] | None = None) -> tuple[bool, str]:
+    """Sendet die Meldung. Mit files wird die Mitteilung erst angelegt und dann jeder Anhang einzeln nachgereicht."""
     if not accesskey:
         return False, "Kein DIVERA-Accesskey hinterlegt."
+    if files and "News" not in payload:
+        return False, "Anhänge lassen sich nur mit Mitteilungen über die neuere Schnittstelle senden."
     error = ""
     for attempt in range(3):
         try:
@@ -400,6 +466,15 @@ def send_divera(accesskey: str, payload: dict) -> tuple[bool, str]:
                     ok = False
             except (ValueError, AttributeError):
                 pass
+            if ok and files:
+                try:
+                    news_id = (resp.json().get("data") or {}).get("id")
+                except (ValueError, AttributeError):
+                    news_id = None
+                if not news_id:
+                    return False, f"HTTP {resp.status_code}: {body} | Mitteilung angelegt, aber DIVERA hat keine ID zurückgegeben; Anhänge nicht übertragen"
+                good, note = upload_attachments(accesskey, news_id, files)
+                return good, f"HTTP {resp.status_code}: {body} | {note}"
             if ok or resp.status_code < 500:
                 return ok, f"HTTP {resp.status_code}: {body}"
             error = f"HTTP {resp.status_code}: {body}"
@@ -432,13 +507,25 @@ def process_message(db, source: m.Source, msg: dict) -> int:
             continue
         matched += 1
         payload = build_payload(rule, values)
+        files, note, skip_note = [], "", ""
+        if attach_mode(rule):
+            try:
+                from . import sources
+                files, skipped = choose_attachments(attach_mode(rule), sources.attachments_of(msg))
+                for item in files:
+                    sources.attachment_bytes(item)
+                    item["description"] = f"Anhang aus der Mail „{msg['subject'][:150]}“"
+                skip_note = " | ausgelassen: " + ", ".join(skipped) if skipped else ""
+                note = (" | Anhänge: " + ", ".join(f["name"] for f in files) if files else " | keine passenden Anhänge in der Mail") + skip_note
+            except Exception as exc:
+                files, note = [], f" | Anhänge konnten nicht gelesen werden ({type(exc).__name__}: {str(exc)[:150]}), Mitteilung ohne Anhang gesendet"
         if tenant.test_mode:
-            status, detail = "test", "Testmodus, nicht gesendet: " + json.dumps(payload, ensure_ascii=False)
+            status, detail = "test", "Testmodus, nicht gesendet: " + json.dumps(payload, ensure_ascii=False) + note
         else:
-            ok, detail = send_divera(key_for(tenant, payload), payload)
+            ok, detail = send_divera(key_for(tenant, payload), payload, files) if files else send_divera(key_for(tenant, payload), payload)
             detail += refusal_hint(tenant, payload, detail)
             status = "gesendet" if ok else "fehler"
-            detail = f"{title_of(payload)} | {detail}"
+            detail = f"{title_of(payload)} | {detail}" + (skip_note if files else note)
         db.add(m.Log(**common, rule_name=rule.name, status=status, detail=detail[:2000]))
         if rule.stop:
             break
