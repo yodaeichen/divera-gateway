@@ -1,0 +1,39 @@
+MIT License
+
+Copyright (c) 2026 yodaeichen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+Ausgenommen von dieser Lizenz / Excluded from this license
+-------------------------------------------------------------------------------
+
+Das Logo und die Bilder in den folgenden Pfaden sind nicht Teil der MIT-Lizenz.
+Alle Rechte daran liegen bei yodaeichen. Ohne schriftliche Erlaubnis dürfen sie
+nicht verwendet, verändert oder weitergegeben werden. Wer das DIVERA Gateway weitergibt
+oder eine eigene Fassung betreibt, ersetzt diese Dateien durch eigene.
+
+The logo and images in the following paths are not covered by the MIT License.
+All rights reserved by yodaeichen. They may not be used, modified or
+distributed without written permission. Replace them with your own files when
+redistributing or running a modified version of DIVERA Gateway.
+
+  app/static/icons/   (Logo und App-Symbole / logo and app icons)
+  app/static/img/feuer.webp
+  app/static/img/atemschutz.svg

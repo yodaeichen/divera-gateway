@@ -473,3 +473,12 @@ gegen nachgebildete Antworten. Bei jedem Push führt ihn eine GitHub Action aus.
 ## Unterstützen
 
 Das Projekt wird in der Freizeit gepflegt. Wer es unterstützen möchte: [GitHub Sponsors](https://github.com/sponsors/yodaeichen)
+
+## Lizenz
+
+Der Code steht unter der [MIT-Lizenz](LICENSE): Jeder darf ihn verwenden, ändern und weitergeben, auch in eigenen
+Fassungen, solange der Lizenzhinweis erhalten bleibt.
+
+**Ausgenommen** sind das Logo und die Bilder in `app/static/icons/`, `app/static/img/feuer.webp` und
+`app/static/img/atemschutz.svg`. Alle Rechte daran liegen bei yodaeichen; wer das Gateway weitergibt oder eine eigene
+Fassung betreibt, ersetzt sie durch eigene.
